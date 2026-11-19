@@ -1,9 +1,9 @@
 diff --git a/ipc/glue/NSExtensionUtils.mm b/ipc/glue/NSExtensionUtils.mm
 new file mode 100644
-index 000000000000..518377a5f5dd
+index 000000000000..3f9c63ccaef9
 --- /dev/null
 +++ b/ipc/glue/NSExtensionUtils.mm
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,370 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -306,13 +306,27 @@ index 000000000000..518377a5f5dd
 +  ExtensionProcess* process = [[ExtensionProcess alloc] init];
 +
 +  [process startWithCompletion:^(NSError* error) {
-+    if (error) {
-+      [process release];
-+      (*ownedCompletion)(Err(LaunchError("NSExtensionProcess::StartProcess")));
++    // The callback runs once, and must not outlive this call. ExtensionProcess
++    // keeps this block alive in its ping, invalidation and interruption
++    // handlers for as long as the process object lives, and the callback owns
++    // the XPC bootstrap message, which holds a Mach send right to the parent's
++    // end of the IPC channel. While the parent holds such a right the kernel
++    // never sends MACH_NOTIFY_NO_SENDERS for that port, so a child that dies
++    // goes unnoticed until the parent next sends to it, and a sync IPC wait on
++    // a crashed child never returns.
++    auto completion = std::move(*ownedCompletion);
++    *ownedCompletion = nullptr;
++    if (!completion) {
 +      return;
 +    }
 +
-+    (*ownedCompletion)(NSExtensionProcess(process));
++    if (error) {
++      [process release];
++      completion(Err(LaunchError("NSExtensionProcess::StartProcess")));
++      return;
++    }
++
++    completion(NSExtensionProcess(process));
 +  }];
 +}
 +
