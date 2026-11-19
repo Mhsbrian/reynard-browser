@@ -33,7 +33,7 @@ rsync -pvtrlL --delete --exclude "XUL" --exclude "*.dylib" --exclude "Test*" --e
 
 # default theme missing error fix
 mkdir -p "${GECKOVIEW_FW_FRAMEWORKS}/default-theme"
-cp -RfL "${DEFAULT_THEME_SRC}/" "${GECKOVIEW_FW_FRAMEWORKS}/default-theme/"
+cp -RfL "${DEFAULT_THEME_SRC}/." "${GECKOVIEW_FW_FRAMEWORKS}/default-theme/"
 echo "resource default-theme file:default-theme/" >> "${GECKOVIEW_FW_FRAMEWORKS}/chrome.manifest"
 
 # sign the GeckoView.framework

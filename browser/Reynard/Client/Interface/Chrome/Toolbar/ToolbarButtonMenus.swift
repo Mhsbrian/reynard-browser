@@ -74,7 +74,9 @@ final class ToolbarButtonMenus {
                 onSelect(direction, index)
             }
             if #available(iOS 15.0, *) {
-                action.subtitle = url
+                // Through UIMenuElement, where `subtitle` exists from iOS 15. UIAction also has it from the
+                // UIMenuLeaf protocol (iOS 16), which is the one the open-source Swift compiler resolves to.
+                (action as UIMenuElement).subtitle = url
             }
             return action
         }
@@ -137,7 +139,7 @@ final class ToolbarButtonMenus {
             if #available(iOS 15.0, *),
                let value = item.url?.trimmingCharacters(in: .whitespacesAndNewlines),
                !value.isEmpty {
-                action.subtitle = displayURL(for: value)
+                (action as UIMenuElement).subtitle = displayURL(for: value)
             }
             return action
         }

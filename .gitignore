@@ -19,3 +19,6 @@ research/
 # Build artifacts
 dist/
 browser/Reynard/JIT/RPPairing/libidevice_ffi.a
+
+# Linux build (tools/linux): caches, intermediates, the prepared SDK copy
+build-linux/

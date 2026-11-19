@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Run a command in Reynard's Linux build image (tools/linux/image), as the calling user, with the
+# checkout mounted at its own path and the host's Darwin SDK bundle (xtool's, made from an Xcode
+# download) mounted read-only at /opt/darwin.
+#
+#   tools/linux/rx image            make the image once (reynard-ios-build:1)
+#   tools/linux/rx swiftc --version run anything in it
+#
+#   REYNARD_SDK_HOME     the home directory that holds .swiftpm/swift-sdks/darwin.artifactbundle
+#                        (default ~/ios-toolchain/home: Xcode 27.1, the iOS 27.1 SDK)
+#   REYNARD_LINUX_STATE  where caches and intermediates live (default <checkout>/build-linux)
+#   REYNARD_RX_ARGS      extra `docker run` arguments
+#   REYNARD_RX_NAME      run detached under this container name and print its id (long builds)
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+IMAGE=${REYNARD_IMAGE:-reynard-ios-build:1}
+if [ "${1:-}" = image ]; then
+    # `docker build` first; where the daemon cannot run a builder, the same provisioning script is
+    # run in a container of the base image and the result committed.
+    if docker build --network host -t "$IMAGE" "$ROOT/tools/linux/image"; then exit 0; fi
+    echo "rx: docker build failed; provisioning with docker run + docker commit" >&2
+    docker rm -f reynard-image-provision >/dev/null 2>&1 || true
+    docker run --network host --name reynard-image-provision \
+        -v "$ROOT/tools/linux/image/provision.sh":/tmp/provision.sh:ro swift:6.4-noble sh /tmp/provision.sh
+    docker commit -c 'ENV RUSTUP_HOME=/opt/rustup' -c 'ENV CARGO_HOME=/opt/cargo' \
+        -c 'ENV PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
+        reynard-image-provision "$IMAGE"
+    docker rm reynard-image-provision >/dev/null
+    exit 0
+fi
+SDK_HOME=${REYNARD_SDK_HOME:-$HOME/ios-toolchain/home}
+BUNDLE=$SDK_HOME/.swiftpm/swift-sdks/darwin.artifactbundle
+[ -d "$BUNDLE/Developer/Platforms/iPhoneOS.platform" ] || { echo "rx: no Darwin SDK bundle under $SDK_HOME (see tools/linux/README.md)" >&2; exit 2; }
+docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "rx: make the image first: tools/linux/rx image" >&2; exit 2; }
+STATE=${REYNARD_LINUX_STATE:-$ROOT/build-linux}
+mkdir -p "$STATE/home"
+mode=(--rm)
+[ -z "${REYNARD_RX_NAME:-}" ] || mode=(-d --name "$REYNARD_RX_NAME")
+# Apple's compiler runtime for iOS (libclang_rt.ios.a) is mounted where the image's clang 21 looks for it.
+# Host networking: Firefox's bootstrap and cargo download on first use. HOME is a folder of the checkout,
+# so those downloads and the clang module cache persist and nothing is written into the SDK home.
+exec docker run "${mode[@]}" --network host --user "$(id -u):$(id -g)" \
+    -e HOME="$STATE/home" -e USER=builder -e LOGNAME=builder -e CARGO_HOME="$STATE/home/.cargo" \
+    -e REYNARD_DARWIN=/opt/darwin -e REYNARD_LINUX_STATE="$STATE" \
+    -e PATH="$ROOT/tools/linux/shims:/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    -v "$BUNDLE":/opt/darwin:ro \
+    -v "$BUNDLE/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/lib/darwin":/usr/lib/clang/21/lib/darwin:ro \
+    -v "$ROOT":"$ROOT" -w "$PWD" ${REYNARD_RX_ARGS:-} "$IMAGE" "$@"

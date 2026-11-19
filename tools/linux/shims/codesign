@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""A Linux stand-in for codesign (tools/linux/README.md): the ad-hoc signature browser/Scripts/AddGecko.sh
+asks for, written by rcodesign.
+
+    codesign --force --sign - [--preserve-metadata=...] [--entitlements FILE] PATH...
+
+A bundle is signed shallowly (its own program and resource seal), as codesign does without --deep.
+Signing with an identity, verifying and displaying are refused: there is no keychain here.
+"""
+import os
+import shutil
+import subprocess
+import sys
+
+args = sys.argv[1:]
+identity, entitlements, paths, i = None, None, [], 0
+while i < len(args):
+    a = args[i]
+    if a in ("--sign", "-s"):
+        identity, i = args[i + 1], i + 2
+    elif a == "--entitlements":
+        entitlements, i = args[i + 1], i + 2
+    elif a in ("--force", "-f", "--verbose", "-v", "--generate-entitlement-der") or a.startswith(("--preserve-metadata", "--timestamp")):
+        i += 1
+    elif a.startswith("-"):
+        sys.exit(f"codesign stand-in: {a} is not handled (only an ad-hoc signature: --force --sign - PATH)")
+    else:
+        paths.append(a)
+        i += 1
+if identity != "-" or not paths:
+    sys.exit("codesign stand-in: only an ad-hoc signature is possible here (--sign -)")
+rcodesign = shutil.which("rcodesign")
+if not rcodesign:
+    sys.exit("codesign stand-in: rcodesign is not installed (tools/linux/image)")
+for path in paths:
+    command = [rcodesign, "sign"]
+    if entitlements:
+        command += ["--entitlements-xml-file", entitlements]
+    if os.path.isdir(path):
+        command += ["--shallow"]
+    done = subprocess.run(command + [path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if done.returncode:
+        sys.stderr.write(done.stdout)
+        sys.exit(f"codesign stand-in: rcodesign could not sign {path}")
+    print(f"{path}: signed ad hoc")

@@ -1,0 +1,25 @@
+#!/bin/sh
+# A Linux stand-in for xcrun (tools/linux/README.md): the few questions Reynard's build asks of it,
+# answered from the Darwin SDK bundle at $REYNARD_DARWIN. Anything else is refused.
+D=${REYNARD_DARWIN:-/opt/darwin}
+sdk=iphoneos
+while [ $# -gt 0 ]; do
+    case $1 in
+        --sdk|-sdk) sdk=$2; shift 2 ;;
+        --show-sdk-path)
+            case $sdk in
+                iphoneos*) echo "$D/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk" ;;
+                iphonesimulator*) echo "$D/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk" ;;
+                macosx*) echo "$D/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" ;;
+                *) echo "xcrun stand-in: no SDK named $sdk" >&2; exit 1 ;;
+            esac
+            exit 0 ;;
+        --find|-f) command -v "$2"; exit $? ;;
+        clang)
+            case ${2:-} in
+                -print-file-name=libclang_rt.*) echo "$D/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/lib/darwin/${2#-print-file-name=}"; exit 0 ;;
+            esac
+            echo "xcrun stand-in: 'xcrun $*' is not handled" >&2; exit 1 ;;
+        *) echo "xcrun stand-in: 'xcrun $*' is not handled" >&2; exit 1 ;;
+    esac
+done
