@@ -1,5 +1,5 @@
 diff --git a/gfx/gl/GLContextProviderEAGL.mm b/gfx/gl/GLContextProviderEAGL.mm
-index 8a6f148dba39..848cca7cfa13 100644
+index 8a6f148dba39..4a14fb40ea44 100644
 --- a/gfx/gl/GLContextProviderEAGL.mm
 +++ b/gfx/gl/GLContextProviderEAGL.mm
 @@ -59,17 +59,18 @@
@@ -29,3 +29,18 @@ index 8a6f148dba39..848cca7cfa13 100644
  }
  
  bool GLContextEAGL::IsDoubleBuffered() const { return true; }
+@@ -154,8 +155,13 @@ GLContext* GLContextProviderEAGL::GetGlobalContext() {
+     RefPtr<GLContext> temp = CreateHeadless({}, &discardFailureId);
+     gGlobalContext = temp;
+ 
++    // Creating an EAGLContext can fail: OpenGL ES is deprecated, and a device
++    // or a virtual machine may have no renderer for it. Report the failure to
++    // the caller, as GLContextProviderCGL does, so that WebRender falls back
++    // to software rendering. Crashing here takes the GPU process down on every
++    // launch.
+     if (!gGlobalContext) {
+-      MOZ_CRASH("Failed to create global context");
++      NS_WARNING("Couldn't init gGlobalContext.");
+     }
+   }
+ 
