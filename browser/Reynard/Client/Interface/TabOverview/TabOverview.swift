@@ -47,6 +47,7 @@ final class TabOverview: UIView {
         static let tabCollectionContentInset: CGFloat = 16
         static let tabCollectionItemSpacing: CGFloat = 16
         static let bottomToolbarContainerHeight: CGFloat = 144
+        static let sideBottomToolbarContentHeight: CGFloat = 56
         static let topToolbarContainerHeight: CGFloat = 76
         static let layoutAnimationDuration: TimeInterval = 0.22
     }
@@ -67,6 +68,9 @@ final class TabOverview: UIView {
     enum ToolbarPosition {
         case top
         case bottom
+        /// The actions are in the system's vertical bar (`verticalBarItems`). Only the switch between private
+        /// and regular tabs stays at the bottom.
+        case side
     }
     
     weak var dataSource: TabOverviewDataSource?
@@ -117,6 +121,9 @@ final class TabOverview: UIView {
     private(set) lazy var presentation = TabOverviewPresentation(tabOverview: self)
     
     private var regularTabsCollectionTopToContainerConstraint: NSLayoutConstraint!
+    private var bottomToolbarHeightConstraint: NSLayoutConstraint!
+    private var bottomToolbarSideTopConstraint: NSLayoutConstraint!
+    private var verticalBarItemsStorage: AnyObject?
     private var regularTabsCollectionTopToToolbarConstraint: NSLayoutConstraint!
     private var regularTabsCollectionBottomToContainerConstraint: NSLayoutConstraint!
     private var regularTabsCollectionBottomToToolbarConstraint: NSLayoutConstraint!
@@ -171,9 +178,14 @@ final class TabOverview: UIView {
     
     func applyLayout(toolbarPosition: ToolbarPosition, animated: Bool) {
         self.toolbarPosition = toolbarPosition
-        let usesBottomToolbar = toolbarPosition == .bottom
+        let usesBottomToolbar = toolbarPosition != .top
+        let showsBottomActions = toolbarPosition == .bottom
         topToolbar.isHidden = usesBottomToolbar
         bottomToolbar.isHidden = !usesBottomToolbar
+        bottomToolbar.setShowsActions(showsBottomActions)
+        bottomToolbarSideTopConstraint.isActive = false
+        bottomToolbarHeightConstraint.isActive = showsBottomActions || !usesBottomToolbar
+        bottomToolbarSideTopConstraint.isActive = !bottomToolbarHeightConstraint.isActive
         regularTabsCollectionTopToContainerConstraint.isActive = usesBottomToolbar
         regularTabsCollectionTopToToolbarConstraint.isActive = !usesBottomToolbar
         regularTabsCollectionBottomToContainerConstraint.isActive = !usesBottomToolbar
@@ -195,7 +207,7 @@ final class TabOverview: UIView {
         switch toolbarPosition {
         case .top:
             topToolbar.alpha = alpha
-        case .bottom:
+        case .bottom, .side:
             bottomToolbar.alpha = alpha
         }
     }
@@ -288,6 +300,13 @@ final class TabOverview: UIView {
     }
     
     private func configureConstraints() {
+        bottomToolbarHeightConstraint = bottomToolbar.heightAnchor.constraint(
+            equalToConstant: UX.bottomToolbarContainerHeight
+        )
+        bottomToolbarSideTopConstraint = bottomToolbar.topAnchor.constraint(
+            equalTo: safeAreaLayoutGuide.bottomAnchor,
+            constant: -UX.sideBottomToolbarContentHeight
+        )
         regularTabsCollectionTopToContainerConstraint = collection.regularTabsCollectionView.topAnchor.constraint(equalTo: topAnchor)
         regularTabsCollectionTopToToolbarConstraint = collection.regularTabsCollectionView.topAnchor.constraint(equalTo: topToolbar.bottomAnchor)
         regularTabsCollectionBottomToContainerConstraint = collection.regularTabsCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
@@ -310,7 +329,7 @@ final class TabOverview: UIView {
             bottomToolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottomToolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottomToolbar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bottomToolbar.heightAnchor.constraint(equalToConstant: UX.bottomToolbarContainerHeight),
+            bottomToolbarHeightConstraint,
         ])
         
     }
@@ -359,5 +378,24 @@ final class TabOverview: UIView {
         : regularCount
         topToolbar.apply(tabCount: regularCount, visibleTabCount: visibleCount, hasVisibleTab: visibleCount > 0)
         bottomToolbar.apply(tabCount: regularCount, visibleTabCount: visibleCount, hasVisibleTab: visibleCount > 0)
+        if #available(iOS 27.1, *) {
+            verticalBarItems.apply(visibleTabCount: visibleCount, hasVisibleTab: visibleCount > 0)
+        }
+    }
+    
+    /// The overview's actions for the system's vertical bar: see `ToolbarPosition.side`.
+    @available(iOS 27.1, *)
+    var verticalBarItems: TabOverviewVerticalBarItems {
+        if let items = verticalBarItemsStorage as? TabOverviewVerticalBarItems {
+            return items
+        }
+        
+        let items = TabOverviewVerticalBarItems()
+        items.onClearTabs = { [weak self] in self?.requestClearTabs() }
+        items.onClearTabsOlderThan = { [weak self] age in self?.requestClearTabsOlderThan(age) }
+        items.onAddTab = { [weak self] in self?.requestNewTab() }
+        items.onDone = { [weak self] in self?.requestDone() }
+        verticalBarItemsStorage = items
+        return items
     }
 }

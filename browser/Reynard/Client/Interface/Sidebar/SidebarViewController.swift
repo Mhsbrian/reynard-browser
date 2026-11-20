@@ -66,6 +66,11 @@ final class SidebarViewController: UISplitViewController, UISplitViewControllerD
         return browserNavigationController
     }
     
+    @available(iOS 27.1, *)
+    override var childForPreferredVerticalBarBehavior: UIViewController? {
+        return browserNavigationController
+    }
+    
     init(contentController: SidebarContentController) {
         self.contentController = contentController
         if #available(iOS 14.0, *) {

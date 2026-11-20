@@ -11,6 +11,7 @@ final class BottomToolbar: UIView {
     private enum UX {
         static let bottomToolbarStandardContentHeight: CGFloat = 94
         static let bottomToolbarCompactContentHeight: CGFloat = 44
+        static let bottomToolbarAddressOnlyContentHeight: CGFloat = 60
         static let bottomToolbarButtonStackHeight: CGFloat = 30
         static let bottomToolbarButtonStackBottomInset: CGFloat = 5
         static let addressBarHorizontalInset: CGFloat = 12
@@ -29,6 +30,10 @@ final class BottomToolbar: UIView {
         case collapsed // visually hidden but still takes up space
         case standard
         case compact
+        /// The address bar with no buttons under it, kept clear of the system's vertical bar.
+        case addressOnly
+        /// Nothing, and no space taken: the address bar is at the top and the buttons are in the vertical bar.
+        case empty
     }
     
     var onBack: (() -> Void)?
@@ -94,6 +99,9 @@ final class BottomToolbar: UIView {
     }()
     
     private var topConstraint: NSLayoutConstraint!
+    private var contentEdgeConstraints: [NSLayoutConstraint] = []
+    private var contentSafeAreaConstraints: [NSLayoutConstraint] = []
+    private(set) var layoutState: LayoutState = .hidden
     private var contentHeightConstraint: NSLayoutConstraint!
     private var standardButtonsBottomConstraint: NSLayoutConstraint!
     private var compactButtonsTopConstraint: NSLayoutConstraint!
@@ -174,24 +182,36 @@ final class BottomToolbar: UIView {
     }
     
     func apply(state: LayoutState, hidesButtons: Bool) {
+        layoutState = state
         let contentHeight: CGFloat
         switch state {
         case .hidden, .standard:
             contentHeight = UX.bottomToolbarStandardContentHeight
         case .collapsed, .compact:
             contentHeight = UX.bottomToolbarCompactContentHeight
+        case .addressOnly:
+            contentHeight = UX.bottomToolbarAddressOnlyContentHeight
+        case .empty:
+            contentHeight = 0
         }
+        
+        // With the buttons in the vertical bar, the bar's column belongs to the system and the address bar
+        // ends where it begins, on whichever side that is.
+        let keepsContentInsideSafeArea = state == .addressOnly
+        let hidesButtons = hidesButtons || state == .addressOnly || state == .empty
         
         UIView.performWithoutAnimation {
             topConstraint.constant = -contentHeight
             contentHeightConstraint.constant = contentHeight
-            isHidden = state == .hidden || state == .collapsed
+            isHidden = state == .hidden || state == .collapsed || state == .empty
             
             let isCompact = state == .compact || state == .collapsed
             standardButtonsBottomConstraint?.isActive = !isCompact
             compactButtonsTopConstraint.isActive = isCompact
             buttons.alpha = hidesButtons ? 0 : 1
             buttons.isUserInteractionEnabled = !hidesButtons
+            NSLayoutConstraint.deactivate(keepsContentInsideSafeArea ? contentEdgeConstraints : contentSafeAreaConstraints)
+            NSLayoutConstraint.activate(keepsContentInsideSafeArea ? contentSafeAreaConstraints : contentEdgeConstraints)
             layoutIfNeeded()
         }
     }
@@ -293,8 +313,6 @@ final class BottomToolbar: UIView {
         compactButtonsTopConstraint = buttons.topAnchor.constraint(equalTo: contentView.topAnchor, constant: UX.bottomToolbarButtonStackTopSpacing)
         
         NSLayoutConstraint.activate([
-            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -UX.backgroundViewHorizontalExtension),
-            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: UX.backgroundViewHorizontalExtension),
             backgroundView.topAnchor.constraint(equalTo: contentView.topAnchor),
             backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
             
@@ -303,8 +321,6 @@ final class BottomToolbar: UIView {
             backgroundTopBorderView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
             backgroundTopBorderView.heightAnchor.constraint(equalToConstant: UX.borderWidth),
             
-            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentView.topAnchor.constraint(equalTo: topAnchor),
             contentHeightConstraint,
             
@@ -312,6 +328,22 @@ final class BottomToolbar: UIView {
             buttons.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -UX.bottomToolbarButtonStackHorizontalInset),
             buttons.heightAnchor.constraint(equalToConstant: UX.bottomToolbarButtonStackHeight),
         ])
+        
+        contentEdgeConstraints = [
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -UX.backgroundViewHorizontalExtension),
+            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: UX.backgroundViewHorizontalExtension),
+        ]
+        // The background stops with the content, so that the vertical bar's column is one surface from top
+        // to bottom.
+        contentSafeAreaConstraints = [
+            contentView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+            backgroundView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(contentEdgeConstraints)
         
         NSLayoutConstraint.activate([
             keyboardDockedBlurView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -UX.backgroundViewHorizontalExtension),

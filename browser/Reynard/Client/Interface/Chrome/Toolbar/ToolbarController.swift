@@ -130,7 +130,7 @@ final class ToolbarController {
         for chromeMode: BrowserChromeMode
     ) -> (total: CGFloat, top: CGFloat) {
         let topToolbarHeight = browserChrome.topToolbarTransitionFrame(in: rootView).height
-        let bottomToolbarHeight = browserChrome.bottomToolbarTransitionFrame(in: rootView).height
+        let bottomToolbarHeight = browserChrome.bottomToolbarScrollHeight(in: rootView)
         switch chromeMode {
         case .phone:
             return (bottomToolbarHeight, 0)

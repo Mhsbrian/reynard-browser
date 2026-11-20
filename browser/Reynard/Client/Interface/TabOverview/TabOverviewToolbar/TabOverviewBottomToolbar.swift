@@ -13,6 +13,7 @@ final class TabOverviewBottomToolbar: UIView {
         static let actionControlsBottomOffset: CGFloat = 54
         static let modeControlToActionControlsSpacing: CGFloat = 18
         static let tabModeControlHeight: CGFloat = 32
+        static let tabModeControlBottomInset: CGFloat = 12
     }
     
     var onClearTabs: (() -> Void)?
@@ -26,6 +27,14 @@ final class TabOverviewBottomToolbar: UIView {
     private let doneButton = TabOverviewToolbarButton(action: .done)
     private lazy var actionButtonStackView = UIStackView(arrangedSubviews: [clearTabsButton, addTabButton, doneButton])
     private lazy var liquidGlassActionToolbar = makeLiquidGlassActionToolbar()
+    private var tabModeControlAboveActionsConstraint: NSLayoutConstraint!
+    private var tabModeControlBottomConstraint: NSLayoutConstraint!
+    private var actionControlsView: UIView {
+        if #available(iOS 26.0, *) {
+            return liquidGlassActionToolbar
+        }
+        return actionButtonStackView
+    }
     private let tabModeControl = UISegmentedControl(items: [NSLocalizedString("Private", comment: ""), NSLocalizedString("0 Tabs", comment: "")])
     
     override init(frame: CGRect) {
@@ -38,6 +47,16 @@ final class TabOverviewBottomToolbar: UIView {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    /// Without its actions the toolbar is only the switch between private and regular tabs, kept inside the
+    /// safe area: the actions are then in the system's vertical bar.
+    func setShowsActions(_ showsActions: Bool) {
+        actionControlsView.isHidden = !showsActions
+        tabModeControlAboveActionsConstraint.isActive = false
+        tabModeControlBottomConstraint.isActive = false
+        tabModeControlAboveActionsConstraint.isActive = showsActions
+        tabModeControlBottomConstraint.isActive = !showsActions
     }
     
     func setMode(_ mode: TabOverview.Mode) {
@@ -83,12 +102,14 @@ final class TabOverviewBottomToolbar: UIView {
     }
     
     private func configureConstraints() {
-        let actionControlsView: UIView
-        if #available(iOS 26.0, *) {
-            actionControlsView = liquidGlassActionToolbar
-        } else {
-            actionControlsView = actionButtonStackView
-        }
+        tabModeControlAboveActionsConstraint = tabModeControl.bottomAnchor.constraint(
+            equalTo: actionControlsView.topAnchor,
+            constant: -UX.modeControlToActionControlsSpacing
+        )
+        tabModeControlBottomConstraint = tabModeControl.bottomAnchor.constraint(
+            equalTo: safeAreaLayoutGuide.bottomAnchor,
+            constant: -UX.tabModeControlBottomInset
+        )
         NSLayoutConstraint.activate([
             actionControlsView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: UX.toolbarContentHorizontalInset),
             actionControlsView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -UX.toolbarContentHorizontalInset),
@@ -96,7 +117,7 @@ final class TabOverviewBottomToolbar: UIView {
             tabModeControl.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: UX.toolbarContentHorizontalInset),
             tabModeControl.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -UX.toolbarContentHorizontalInset),
             tabModeControl.heightAnchor.constraint(equalToConstant: UX.tabModeControlHeight),
-            tabModeControl.bottomAnchor.constraint(equalTo: actionControlsView.topAnchor, constant: -UX.modeControlToActionControlsSpacing),
+            tabModeControlAboveActionsConstraint,
         ])
     }
     

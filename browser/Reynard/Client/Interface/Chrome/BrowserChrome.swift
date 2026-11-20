@@ -51,6 +51,10 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         let search: SearchState
         let topInset: CGFloat
         let family: BrowserLayout.Family
+        let toolbarPlacement: BrowserLayout.ToolbarPlacement
+        /// Whether the top toolbar shares its row with the status items, and so follows the system's region
+        /// for a bar on that edge. The inner display of an iPhone Duo.
+        let topToolbarSharesStatusRow: Bool
         let orientation: BrowserLayout.ViewportOrientation
         let isTwoThirdSplitScreenOrSmaller: Bool
         let sidebarButtonVisible: Bool
@@ -121,9 +125,12 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     private var actionBarBottomConstraint: NSLayoutConstraint?
     private var actionBarKeyboardBottomConstraint: NSLayoutConstraint?
     private var actionBarDockOffset: CGFloat = 0
+    private var actionBarEdgeConstraints: [NSLayoutConstraint] = []
+    private var actionBarSafeAreaConstraints: [NSLayoutConstraint] = []
     private var modernActionBarDismissalID: UUID?
     
     private var state: State?
+    private var verticalBarItemsStorage: AnyObject?
     private var toolbarCollapseProgress: CGFloat = 0
     private var toolbarTextCenterProgress: CGFloat = 0
     private var isToolbarContentHidden = false
@@ -185,7 +192,42 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     
     func minimizedToolbarHeight(for mode: BrowserChromeMode) -> CGFloat {
         let inset = mode == .phone ? safeAreaInsets.bottom : (state?.topInset ?? safeAreaInsets.top)
-        return inset + UX.minimizedToolbarContentHeight
+        let minimizedHeight = inset + UX.minimizedToolbarContentHeight
+        // A top toolbar in the status items' row has no height to give back: the row stays as tall as the
+        // status items whatever the toolbar does. It keeps its place and only the tab strip under it goes.
+        if mode != .phone, state?.topToolbarSharesStatusRow == true {
+            return max(minimizedHeight, topToolbar.bounds.height)
+        }
+        return minimizedHeight
+    }
+    
+    /// How much of the bottom toolbar slides away with the page.
+    func bottomToolbarScrollHeight(in view: UIView) -> CGFloat {
+        return bottomToolbar.layoutState == .empty ? 0 : bottomToolbarTransitionFrame(in: view).height
+    }
+    
+    /// Where the system puts the top of a bar that shares the status items' row, in this view.
+    func statusRowTopInset() -> CGFloat? {
+        return topToolbar.statusRowTopInset()
+    }
+    
+    /// The toolbar's buttons for the system's vertical bar: see `VerticalBarItems`.
+    @available(iOS 27.1, *)
+    var verticalBarItems: VerticalBarItems {
+        if let items = verticalBarItemsStorage as? VerticalBarItems {
+            return items
+        }
+        
+        let items = VerticalBarItems()
+        items.onBack = { [weak self] in self?.onBack?() }
+        items.onForward = { [weak self] in self?.onForward?() }
+        items.onShare = { [weak self] in self?.onShare?() }
+        items.onLibrary = { [weak self] in self?.onLibrary?() }
+        items.onDownloads = { [weak self] in self?.onDownloads?() }
+        items.onNewTab = { [weak self] in self?.onNewTab?() }
+        items.onTabOverview = { [weak self] in self?.onTabOverview?() }
+        verticalBarItemsStorage = items
+        return items
     }
     
     func addressBarFrame(in view: UIView) -> CGRect {
@@ -215,6 +257,10 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         addressBar.updateLayout(position: state.position, chromeMode: state.mode)
         attachAddressBar(for: state.mode)
         attachActionBar(for: state.mode)
+        // Beside a vertical bar, what sits above the address bar ends where the address bar does.
+        let keepsActionBarInsideSafeArea = state.toolbarPlacement == .verticalBar
+        NSLayoutConstraint.deactivate(keepsActionBarInsideSafeArea ? actionBarEdgeConstraints : actionBarSafeAreaConstraints)
+        NSLayoutConstraint.activate(keepsActionBarInsideSafeArea ? actionBarSafeAreaConstraints : actionBarEdgeConstraints)
         configureOverlayPositioningIfNeeded()
         overlayContentView.setLayoutMode(overlayLayoutMode(for: state))
         updateOverlayWidth()
@@ -230,7 +276,11 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         let bottomState: BottomToolbar.LayoutState
         if state.presentation != .browsing {
             topState = .hidden
-            bottomState = state.mode == .compact ? .collapsed : .hidden
+            if state.mode == .compact {
+                bottomState = state.toolbarPlacement == .verticalBar ? .empty : .collapsed
+            } else {
+                bottomState = .hidden
+            }
         } else {
             topState = resolvedTopState(for: state)
             bottomState = resolvedBottomState(for: state)
@@ -240,7 +290,9 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
             state: topState,
             topInset: state.topInset,
             family: state.family,
-            sidebarButtonVisible: state.sidebarButtonVisible
+            sidebarButtonVisible: state.sidebarButtonVisible,
+            sharesStatusRow: state.topToolbarSharesStatusRow,
+            keepsBackgroundInsideSafeArea: state.toolbarPlacement == .verticalBar
         )
         bottomToolbar.apply(
             state: bottomState,
@@ -580,6 +632,9 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     func updateNavigation(canGoBack: Bool, canGoForward: Bool, canShare: Bool) {
         topToolbar.updateNavigation(canGoBack: canGoBack, canGoForward: canGoForward, canShare: canShare)
         bottomToolbar.updateNavigation(canGoBack: canGoBack, canGoForward: canGoForward, canShare: canShare)
+        if #available(iOS 27.1, *) {
+            verticalBarItems.updateNavigation(canGoBack: canGoBack, canGoForward: canGoForward, canShare: canShare)
+        }
     }
     
     func configureNavigationMenus(
@@ -588,6 +643,9 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     ) {
         topToolbar.configureNavigationMenus(itemsProvider: itemsProvider, onSelect: onSelect)
         bottomToolbar.configureNavigationMenus(itemsProvider: itemsProvider, onSelect: onSelect)
+        if #available(iOS 27.1, *) {
+            verticalBarItems.configureNavigationMenus(itemsProvider: itemsProvider, onSelect: onSelect)
+        }
     }
     
     func configureRecentlyClosedTabsMenu(
@@ -600,11 +658,21 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
             itemsProvider: itemsProvider,
             onSelect: onSelect
         )
+        if #available(iOS 27.1, *) {
+            verticalBarItems.configureRecentlyClosedTabsMenu(
+                isAvailable: isAvailable,
+                itemsProvider: itemsProvider,
+                onSelect: onSelect
+            )
+        }
     }
     
     func configureLibraryMenus(onSelect: @escaping (LibrarySection) -> Void) {
         topToolbar.configureLibraryMenus(onSelect: onSelect)
         bottomToolbar.configureLibraryMenus(onSelect: onSelect)
+        if #available(iOS 27.1, *) {
+            verticalBarItems.configureLibraryMenus(onSelect: onSelect)
+        }
     }
     
     func configureTabOverviewMenus(
@@ -628,16 +696,31 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
             onNewPrivateTab: onNewPrivateTab,
             onNewTab: onNewTab
         )
+        if #available(iOS 27.1, *) {
+            verticalBarItems.configureTabOverviewMenus(
+                tabCountProvider: tabCountProvider,
+                onCloseAllTabs: onCloseAllTabs,
+                onCloseTab: onCloseTab,
+                onNewPrivateTab: onNewPrivateTab,
+                onNewTab: onNewTab
+            )
+        }
     }
     
     func updateDownload(_ summary: DownloadStoreSummary) {
         bottomToolbar.updateDownload(summary)
         topToolbar.updateDownload(summary)
+        if #available(iOS 27.1, *) {
+            verticalBarItems.updateDownload(summary)
+        }
     }
     
     func setMenuButtonIndicatesUpdate(_ hasUpdate: Bool) {
         topToolbar.setMenuButtonIndicatesUpdate(hasUpdate)
         bottomToolbar.setMenuButtonIndicatesUpdate(hasUpdate)
+        if #available(iOS 27.1, *) {
+            verticalBarItems.setMenuButtonIndicatesUpdate(hasUpdate)
+        }
     }
     
     func syncSidebarButton(splitViewController: UISplitViewController?) {
@@ -801,8 +884,12 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         toolbarTextLabel.font = presentation.font
         toolbarTextLabel.attributedText = presentation.text
         toolbarTextLabel.bounds = CGRect(x: 0, y: 0, width: expandedFrame.width, height: presentation.font.lineHeight)
+        // Beside a vertical bar the text is centred in what is left of the width, as the address bar is.
+        let centerX = state.toolbarPlacement == .verticalBar
+        ? bounds.inset(by: UIEdgeInsets(top: 0, left: safeAreaInsets.left, bottom: 0, right: safeAreaInsets.right)).midX
+        : bounds.midX
         toolbarTextLabel.center = CGPoint(
-            x: expandedFrame.midX + (bounds.midX - expandedFrame.midX) * textCenterProgress,
+            x: expandedFrame.midX + (centerX - expandedFrame.midX) * textCenterProgress,
             y: textEdge + (isBottom ? -textHeight : textHeight) / 2
         )
         toolbarTextLabel.transform = CGAffineTransform(scaleX: scale, y: scale)
@@ -858,9 +945,16 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
             pageZoomDismissView.trailingAnchor.constraint(equalTo: trailingAnchor),
             pageZoomDismissView.bottomAnchor.constraint(equalTo: bottomAnchor),
             
+        ])
+        actionBarEdgeConstraints = [
             actionBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             actionBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-        ])
+        ]
+        actionBarSafeAreaConstraints = [
+            actionBar.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            actionBar.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(actionBarEdgeConstraints)
         topToolbar.extendBackground(to: tabBar.bottomAnchor)
         bottomToolbar.configureTopAnchor(to: safeAreaLayoutGuide.bottomAnchor)
     }
@@ -958,10 +1052,11 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         case .pad:
             return .hidden
         case .compact:
-            return .compact
+            return state.toolbarPlacement == .verticalBar ? .empty : .compact
         case .phone:
             switch state.search {
-            case .inactive, .focused, .scrollingEmbeddedSuggestions: return .standard
+            case .inactive, .focused, .scrollingEmbeddedSuggestions:
+                return state.toolbarPlacement == .verticalBar ? .addressOnly : .standard
             case .scrollingDetachedSuggestions: return .hidden
             }
         }

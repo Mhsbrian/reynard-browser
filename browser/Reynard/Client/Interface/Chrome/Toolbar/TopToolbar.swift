@@ -134,6 +134,15 @@ final class TopToolbar: UIView {
         return safeAreaLayoutGuide
     }()
     
+    /// The width the toolbar's content may use: the safe area, or the system's region for a top bar where the
+    /// toolbar shares its row with the status items.
+    private let barContentGuide = UILayoutGuide()
+    private var barContentSafeAreaConstraints: [NSLayoutConstraint] = []
+    private var barContentStatusRowConstraints: [NSLayoutConstraint] = []
+    private var backgroundEdgeConstraints: [NSLayoutConstraint] = []
+    private var backgroundSafeAreaConstraints: [NSLayoutConstraint] = []
+    private var sharesStatusRow = false
+    
     private var compactAddressBarHorizontalInset: CGFloat {
         if #available(iOS 26.0, *) {
             return 0
@@ -189,7 +198,7 @@ final class TopToolbar: UIView {
                 addressBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -UX.topToolbarAddressBarVerticalSpacing),
             ]
             widthLimitedStandardAddressBarConstraints = [
-                addressBar.centerXAnchor.constraint(equalTo: contentLayoutGuide.centerXAnchor),
+                addressBar.centerXAnchor.constraint(equalTo: barContentGuide.centerXAnchor),
                 addressBar.widthAnchor.constraint(equalToConstant: UX.topToolbarAddressBarWidthLimit),
                 addressBar.leadingAnchor.constraint(greaterThanOrEqualTo: leadingButtons.trailingAnchor, constant: UX.topToolbarAddressBarSpacing),
                 addressBar.trailingAnchor.constraint(lessThanOrEqualTo: trailingButtons.leadingAnchor, constant: -UX.topToolbarAddressBarSpacing),
@@ -198,11 +207,11 @@ final class TopToolbar: UIView {
             ]
             compactAddressBarConstraints = [
                 addressBar.leadingAnchor.constraint(
-                    equalTo: contentLayoutGuide.leadingAnchor,
+                    equalTo: barContentGuide.leadingAnchor,
                     constant: compactAddressBarHorizontalInset
                 ),
                 addressBar.trailingAnchor.constraint(
-                    equalTo: contentLayoutGuide.trailingAnchor,
+                    equalTo: barContentGuide.trailingAnchor,
                     constant: -compactAddressBarHorizontalInset
                 ),
                 addressBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: UX.topToolbarAddressBarVerticalSpacing),
@@ -234,13 +243,19 @@ final class TopToolbar: UIView {
         state: LayoutState,
         topInset: CGFloat,
         family: BrowserLayout.Family,
-        sidebarButtonVisible: Bool
+        sidebarButtonVisible: Bool,
+        sharesStatusRow: Bool = false,
+        keepsBackgroundInsideSafeArea: Bool = false
     ) {
         layoutState = state
         layoutFamily = family
         layoutSidebarButtonVisible = sidebarButtonVisible
         
         UIView.performWithoutAnimation {
+            setSharesStatusRow(sharesStatusRow)
+            // Beside a vertical bar the background stops with the content, as the bottom toolbar's does.
+            NSLayoutConstraint.deactivate(keepsBackgroundInsideSafeArea ? backgroundEdgeConstraints : backgroundSafeAreaConstraints)
+            NSLayoutConstraint.activate(keepsBackgroundInsideSafeArea ? backgroundSafeAreaConstraints : backgroundEdgeConstraints)
             contentTopConstraint.constant = topInset
             heightConstraint.constant = topInset + UX.topToolbarContentHeight
             isHidden = state == .hidden
@@ -378,6 +393,7 @@ final class TopToolbar: UIView {
     }
     
     private func configureHierarchy() {
+        addLayoutGuide(barContentGuide)
         addSubview(backgroundView)
         addSubview(backgroundBottomBorderView)
         addSubview(contentView)
@@ -392,9 +408,23 @@ final class TopToolbar: UIView {
         leadingWidthConstraint = leadingButtons.widthAnchor.constraint(equalToConstant: UX.topToolbarStandardButtonStackWidth)
         trailingWidthConstraint = trailingButtons.widthAnchor.constraint(equalToConstant: UX.topToolbarStandardButtonStackWidth)
         
-        NSLayoutConstraint.activate([
+        barContentSafeAreaConstraints = [
+            barContentGuide.leadingAnchor.constraint(equalTo: contentLayoutGuide.leadingAnchor),
+            barContentGuide.trailingAnchor.constraint(equalTo: contentLayoutGuide.trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(barContentSafeAreaConstraints)
+        
+        backgroundEdgeConstraints = [
             backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -UX.backgroundViewHorizontalExtension),
             backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: UX.backgroundViewHorizontalExtension),
+        ]
+        backgroundSafeAreaConstraints = [
+            backgroundView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(backgroundEdgeConstraints)
+        
+        NSLayoutConstraint.activate([
             backgroundView.topAnchor.constraint(equalTo: topAnchor),
             backgroundBottomConstraint,
             
@@ -409,12 +439,12 @@ final class TopToolbar: UIView {
             contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentView.heightAnchor.constraint(equalToConstant: UX.topToolbarContentHeight),
             
-            leadingButtons.leadingAnchor.constraint(equalTo: contentLayoutGuide.leadingAnchor, constant: UX.topToolbarHorizontalInset),
+            leadingButtons.leadingAnchor.constraint(equalTo: barContentGuide.leadingAnchor, constant: UX.topToolbarHorizontalInset),
             leadingButtons.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             leadingWidthConstraint,
             leadingButtons.heightAnchor.constraint(equalToConstant: UX.topToolbarButtonStackHeight),
             
-            trailingButtons.trailingAnchor.constraint(equalTo: contentLayoutGuide.trailingAnchor, constant: -UX.topToolbarHorizontalInset),
+            trailingButtons.trailingAnchor.constraint(equalTo: barContentGuide.trailingAnchor, constant: -UX.topToolbarHorizontalInset),
             trailingButtons.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             trailingWidthConstraint,
             trailingButtons.heightAnchor.constraint(equalToConstant: UX.topToolbarButtonStackHeight),
@@ -453,11 +483,56 @@ final class TopToolbar: UIView {
     }
     
     private var contentLayoutInsets: UIEdgeInsets {
+        if #available(iOS 27.1, *), sharesStatusRow {
+            let frame = statusRowGuide.layoutFrame
+            if frame.width > 0 {
+                return UIEdgeInsets(top: 0, left: frame.minX, bottom: 0, right: bounds.width - frame.maxX)
+            }
+        }
+        
         if #available(iOS 26.0, *) {
             return edgeInsets(for: .safeArea(cornerAdaptation: .horizontal))
         }
         
         return safeAreaInsets
+    }
+    
+    // MARK: - Status Row
+    
+    /// The system's region for a bar of this toolbar's height on the top edge. On the inner display of an
+    /// iPhone Duo it lies in the status items' row and ends where they begin.
+    @available(iOS 27.1, *)
+    private var statusRowGuide: UILayoutGuide {
+        return layoutGuide(for: .bar(onEdge: UIRectEdge.top, extent: UX.topToolbarContentHeight))
+    }
+    
+    /// How far below this view's top edge that region starts.
+    func statusRowTopInset() -> CGFloat? {
+        guard #available(iOS 27.1, *) else {
+            return nil
+        }
+        return edgeInsets(for: .bar(onEdge: UIRectEdge.top, extent: UX.topToolbarContentHeight)).top
+    }
+    
+    private func setSharesStatusRow(_ sharesStatusRow: Bool) {
+        guard #available(iOS 27.1, *) else {
+            return
+        }
+        
+        guard self.sharesStatusRow != sharesStatusRow else {
+            return
+        }
+        
+        self.sharesStatusRow = sharesStatusRow
+        if barContentStatusRowConstraints.isEmpty {
+            let guide = statusRowGuide
+            barContentStatusRowConstraints = [
+                barContentGuide.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+                barContentGuide.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+            ]
+        }
+        NSLayoutConstraint.deactivate(sharesStatusRow ? barContentSafeAreaConstraints : barContentStatusRowConstraints)
+        NSLayoutConstraint.activate(sharesStatusRow ? barContentStatusRowConstraints : barContentSafeAreaConstraints)
     }
     
     private func updateStandardAddressBarLayout() {

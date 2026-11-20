@@ -11,10 +11,21 @@ import UIKit
 final class BrowserViewController: UIViewController, GeckoScreenOrientationDelegate {
     private enum UX {
         static let layoutAnimationDuration: TimeInterval = 0.22
+        static let verticalBarEdgeHoldDuration: TimeInterval = 1
+        static let sizeTransitionAllowance: TimeInterval = 10
+        static let systemBarInstallDelay: TimeInterval = 0.2
+        static let launchSettleAllowance: TimeInterval = 3
         static let fallbackTopInset: CGFloat = 24
         static let keyboardAnimationDuration: TimeInterval = 0.25
         static let keyboardAnimationCurve: UInt = 7
         static let floatingKeyboardWidthRatio: CGFloat = 0.8
+    }
+    
+    /// What this browser has put in its navigation controller's bars, which the system draws as a vertical bar.
+    private enum SystemBarContent {
+        case none
+        case browsing
+        case tabOverview
     }
     
     private struct KeyboardAnimation {
@@ -48,6 +59,19 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         family: BrowserLayout.usesTabletWindowRules ? .regular : .compact
     )
     private var resolvedLayoutEnvironment: BrowserLayout.Environment?
+    private var contentEdgeConstraints: [NSLayoutConstraint] = []
+    private var contentSafeAreaConstraints: [NSLayoutConstraint] = []
+    private var systemBarContent = SystemBarContent.none
+    private var appliedTopInset: CGFloat?
+    private var prefersVerticalBarDisabled = false
+    private var isSystemBarUpdateScheduled = false
+    private var awaitsSizeTransition = false
+    private var isVerticalBarEdgeCheckScheduled = false
+    private var hasWindowSettledAfterLaunch = false
+    private var verticalBarColumn = (left: CGFloat(0), right: CGFloat(0))
+    private var heldVerticalBarEdge = BrowserLayout.VerticalBarEdge.none
+    private var verticalBarEdgeRelease: DispatchWorkItem?
+    private var isTransitioningSize = false
     private var appliedHomepageGridWidth: HomepageGridWidth?
     
     // MARK: - Views And Coordinators
@@ -124,6 +148,20 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     }
     
     override var childForStatusBarHidden: UIViewController? {
+        return sidebarCoordinator.statusBarController
+    }
+    
+    /// Where the window is regular in both dimensions the browser has one bar along the top, with the status
+    /// items at its end, as Safari does on the inner display of an iPhone Duo: the address bar cannot stand
+    /// on its side, so a vertical bar there would cost a column beside the page and a row above it.
+    /// Fullscreen media takes the whole display.
+    @available(iOS 27.1, *)
+    override var preferredVerticalBarBehavior: UIVerticalBarBehavior {
+        return prefersVerticalBarDisabled ? .disabled : .automatic
+    }
+    
+    @available(iOS 27.1, *)
+    override var childForPreferredVerticalBarBehavior: UIViewController? {
         return sidebarCoordinator.statusBarController
     }
     
@@ -261,6 +299,9 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         invalidateNavigationThumbnailsIfNeeded()
         updateHomepageGridWidthIfNeeded()
         scheduleSidebarHostAdoption()
+        updateVerticalBarSafeArea()
+        updateReservedVerticalBarColumn()
+        updateTopInsetIfNeeded()
     }
     
     /// The sidebar changes the width of the page area without changing the layout, and the homepage's grid
@@ -307,6 +348,40 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         ) { (viewController: BrowserViewController, _: UITraitCollection) in
             viewController.layoutTraitsDidChange()
         }
+        
+        if #available(iOS 27.1, *) {
+            // The edge is unspecified until the view is in its window, even on an iPhone Duo. These traits
+            // change many times in a fold and seldom change the edge, so they get a handler of their own that
+            // lays out only when it has.
+            registerForTraitChanges(
+                UITraitCollection.systemTraitsAffectingVerticalBarEdge
+            ) { (viewController: BrowserViewController, _: UITraitCollection) in
+                viewController.verticalBarTraitsDidChange()
+            }
+        }
+    }
+    
+    private func verticalBarTraitsDidChange() {
+        guard !isVerticalBarEdgeCheckScheduled else {
+            return
+        }
+        
+        isVerticalBarEdgeCheckScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            
+            self.isVerticalBarEdgeCheckScheduled = false
+            guard self.isViewLoaded,
+                  self.view.window != nil,
+                  !self.sidebarCoordinator.hostsSidebar,
+                  self.currentLayoutEnvironment().verticalBarEdge != self.resolvedLayoutEnvironment?.verticalBarEdge else {
+                return
+            }
+            
+            self.updateBrowserLayout(animated: false)
+        }
     }
     
     private func layoutTraitsDidChange() {
@@ -329,6 +404,11 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
+        isTransitioningSize = true
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.isTransitioningSize = false
+            self?.awaitsSizeTransition = false
+        }
         if let readerSettings = presentedViewController as? ReaderSettingsViewController {
             readerSettings.dismiss(animated: false)
         }
@@ -379,9 +459,18 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             bottomAnchor: view.bottomAnchor
         )
         
-        NSLayoutConstraint.activate([
+        contentEdgeConstraints = [
             contentView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ]
+        // Left and right, not leading and trailing: the vertical bar's column is on one side of the hardware
+        // whatever the language.
+        contentSafeAreaConstraints = [
+            contentView.leftAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leftAnchor),
+            contentView.rightAnchor.constraint(equalTo: view.safeAreaLayoutGuide.rightAnchor),
+        ]
+        NSLayoutConstraint.activate(contentEdgeConstraints)
+        NSLayoutConstraint.activate([
             contentView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor).withPriority(.defaultHigh),
             contentView.bottomAnchor.constraint(equalTo: browserChrome.bottomToolbarTopAnchor).withPriority(.defaultHigh),
             browserChrome.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -604,13 +693,19 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         let environment = currentLayoutEnvironment()
         resolvedLayoutEnvironment = environment
         browserLayout = resolveBrowserLayout(in: environment)
+        if let previousEnvironment,
+           environment.isDisplayChange(from: previousEnvironment),
+           environment.windowSize == previousEnvironment.windowSize,
+           !isTransitioningSize {
+            expectSizeTransition()
+        }
         
         // A new layout moves the address bar, which ends its editing. When the layout is new because the
         // window moved to the other display of an iPhone Duo, what was being typed goes with it.
         var addressBarEditing: AddressBar.Editing?
         if browserLayout != previousLayout {
             if let previousEnvironment,
-               environment.isDisplayChange(from: previousEnvironment) {
+               environment.isSystemRearrangement(from: previousEnvironment) {
                 addressBarEditing = browserChrome.addressBarEditing
             }
             if let readerSettings = presentedViewController as? ReaderSettingsViewController {
@@ -639,7 +734,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             browserChrome.resumeAddressBarEditing(addressBarEditing)
         }
         
-        if environment.isRegular {
+        // A vertical bar says iPhone Duo as surely as a hinge does, and sooner.
+        if environment.isRegular || environment.verticalBarEdge != .none {
             requestSidebarHost()
         }
     }
@@ -687,10 +783,235 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             }
         }
         
+        applyContentInsets()
         applyTabOverviewLayout()
         applyBrowserChromeLayout(animated: animated)
+        setNeedsSystemBarUpdate()
+        updateVerticalBarBehavior()
         updateNavigationButtons()
         setNeedsStatusBarAppearanceUpdate()
+    }
+    
+    // MARK: - Vertical Bar
+    
+    /// Keeps the page out from under a vertical bar, on whichever side the system has put it.
+    ///
+    /// The system reserves the bar's column through the safe area, and a page does not know to stay out of it.
+    /// Devices with no vertical bar keep the page from edge to edge, as before.
+    private func applyContentInsets() {
+        let hasVerticalBar = resolvedLayoutEnvironment.map { $0.verticalBarEdge != .none } ?? false
+        let keepsContentInsideSafeArea = hasVerticalBar && !isShowingFullscreenMedia
+        NSLayoutConstraint.deactivate(keepsContentInsideSafeArea ? contentEdgeConstraints : contentSafeAreaConstraints)
+        NSLayoutConstraint.activate(keepsContentInsideSafeArea ? contentSafeAreaConstraints : contentEdgeConstraints)
+        updateReservedVerticalBarColumn()
+    }
+    
+    /// Keeps the vertical bar's column free while the system has not yet put the bar there.
+    ///
+    /// When an iPhone Duo is closed the layout for the cover display is in place before the system has put its
+    /// vertical bar back (see `updateVerticalBarBehavior()`), and in between the safe area has no column in
+    /// it. Without this the page would take the whole width for that moment and give the column up again,
+    /// which is a second resize of the page for every fold. The width is the one the column last had.
+    private func updateReservedVerticalBarColumn() {
+        guard contentSafeAreaConstraints.count == 2 else {
+            return
+        }
+        
+        let insets = view.safeAreaInsets
+        var reserved = (left: CGFloat(0), right: CGFloat(0))
+        if browserLayout.toolbarPlacement == .verticalBar, !isShowingFullscreenMedia {
+            if insets.left > 0 || insets.right > 0 {
+                verticalBarColumn = (insets.left, insets.right)
+            } else {
+                reserved = verticalBarColumn
+            }
+        }
+        
+        if abs(contentSafeAreaConstraints[0].constant - reserved.left) > 0.5 {
+            contentSafeAreaConstraints[0].constant = reserved.left
+        }
+        if abs(contentSafeAreaConstraints[1].constant + reserved.right) > 0.5 {
+            contentSafeAreaConstraints[1].constant = -reserved.right
+        }
+    }
+    
+    /// Brings the system's bars in line with the layout.
+    ///
+    /// Taking the items away is cheap and cannot wait: left in place outside the vertical bar, the system
+    /// would draw them along the top. Handing them over is the expensive part of a fold, and the system gives
+    /// up on an app that takes too long to answer a change of display. So that waits for the window to arrive:
+    /// when an iPhone Duo is closed the size classes change before the window does, and bars installed in
+    /// between are laid out again for every step of the move. For the same reason nothing is handed over before
+    /// the system has reported the hinge to a newly launched window: until then a window on the inner display
+    /// can look like any iPhone's, and the bars it would be given are taken away again a moment later.
+    func setNeedsSystemBarUpdate() {
+        guard #available(iOS 27.1, *) else {
+            return
+        }
+        
+        let wantedContent = wantedSystemBarContent
+        guard wantedContent != systemBarContent else {
+            return
+        }
+        
+        guard wantedContent != .none else {
+            updateSystemBars()
+            return
+        }
+        
+        guard !isSystemBarUpdateScheduled else {
+            return
+        }
+        
+        isSystemBarUpdateScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + UX.systemBarInstallDelay) { [weak self] in
+            guard let self else {
+                return
+            }
+            
+            self.isSystemBarUpdateScheduled = false
+            // The layout is applied again when the window has arrived, and comes back here.
+            guard !self.isTransitioningSize,
+                  !self.awaitsSizeTransition,
+                  self.hasWindowSettledAfterLaunch else {
+                return
+            }
+            
+            self.updateSystemBars()
+        }
+    }
+    
+    /// Notes that the window is about to change size, when the size classes say it has moved to the other
+    /// display and its bounds do not yet. Should the change never come, the bars stop waiting for it.
+    private func expectSizeTransition() {
+        awaitsSizeTransition = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + UX.sizeTransitionAllowance) { [weak self] in
+            guard let self,
+                  self.awaitsSizeTransition,
+                  !self.isTransitioningSize else {
+                return
+            }
+            
+            self.awaitsSizeTransition = false
+            self.setNeedsSystemBarUpdate()
+            self.updateVerticalBarBehavior()
+        }
+    }
+    
+    private var wantedSystemBarContent: SystemBarContent {
+        guard navigationController != nil,
+              browserLayout.toolbarPlacement == .verticalBar,
+              !isShowingFullscreenMedia else {
+            return .none
+        }
+        return tabOverview.isPresented ? .tabOverview : .browsing
+    }
+    
+    private var wantsVerticalBarDisabled: Bool {
+        let hasVerticalBar = resolvedLayoutEnvironment.map { $0.verticalBarEdge != .none } ?? false
+        let isRegular = resolvedLayoutEnvironment?.isRegular ?? false
+        return hasVerticalBar && (isRegular || isShowingFullscreenMedia)
+    }
+    
+    /// Hands the toolbar's buttons to the navigation controller where the layout puts them in the vertical bar,
+    /// and takes them back everywhere else.
+    private func updateSystemBars() {
+        guard #available(iOS 27.1, *),
+              let navigationController else {
+            return
+        }
+        
+        let content = wantedSystemBarContent
+        guard content != systemBarContent else {
+            return
+        }
+        
+        systemBarContent = content
+        switch content {
+        case .none:
+            navigationItem.leadingItemGroups = []
+            navigationItem.trailingItemGroups = []
+            toolbarItems = nil
+        case .browsing:
+            let items = browserChrome.verticalBarItems
+            navigationItem.leadingItemGroups = items.leadingGroups
+            navigationItem.trailingItemGroups = items.trailingGroups
+            toolbarItems = items.toolbarItems
+        case .tabOverview:
+            let items = tabOverview.verticalBarItems
+            navigationItem.leadingItemGroups = []
+            navigationItem.trailingItemGroups = items.trailingGroups
+            toolbarItems = items.toolbarItems
+        }
+        navigationItem.style = .browser
+        navigationController.setNavigationBarHidden(content == .none, animated: false)
+        navigationController.setToolbarHidden(content == .none, animated: false)
+    }
+    
+    /// Tells the system when the browser wants the vertical bar turned off or back on.
+    ///
+    /// The system answers by moving the status items between the side and the top, which is as much work again
+    /// as a fold. Asked for in the middle of one, the two together cost the app the time the system allows it
+    /// for a change of display, so it is never asked for while the window is changing size.
+    private func updateVerticalBarBehavior() {
+        guard #available(iOS 27.1, *),
+              !isTransitioningSize else {
+            return
+        }
+        
+        let prefersDisabled = wantsVerticalBarDisabled
+        guard prefersDisabled != prefersVerticalBarDisabled else {
+            return
+        }
+        
+        // Turned back on, the bar is wanted before the window moves to the cover display, so that the move is
+        // made with the status items already where that display has them. Turned off, it waits for the window.
+        guard !prefersDisabled || !awaitsSizeTransition else {
+            return
+        }
+        
+        prefersVerticalBarDisabled = prefersDisabled
+        setNeedsUpdateOfVerticalBarConfiguration()
+    }
+    
+    /// The navigation bar is part of the vertical bar and takes no room above the page, but the navigation
+    /// controller still insets its content as if it did. This takes that inset back out, so that everything
+    /// that reads the safe area starts where the window's does.
+    private func updateVerticalBarSafeArea() {
+        var barInset: CGFloat = 0
+        if systemBarContent != .none,
+           let navigationView = navigationController?.viewIfLoaded {
+            let ownInset = view.safeAreaInsets.top - additionalSafeAreaInsets.top
+            barInset = max(0, ownInset - navigationView.safeAreaInsets.top)
+        }
+        guard abs(additionalSafeAreaInsets.top + barInset) > 0.5 else {
+            return
+        }
+        
+        additionalSafeAreaInsets.top = -barInset
+    }
+    
+    /// Whether the top toolbar is in the status items' row: the inner display of an iPhone Duo, where the
+    /// vertical bar is turned off and the status items go back to the top.
+    private var topToolbarSharesStatusRow: Bool {
+        guard let environment = resolvedLayoutEnvironment else {
+            return false
+        }
+        return environment.verticalBarEdge != .none
+        && environment.isRegular
+        && browserLayout.chromeMode == .pad
+        && !isShowingFullscreenMedia
+    }
+    
+    /// The system's region for a top bar is only known once the window has been laid out for the display.
+    private func updateTopInsetIfNeeded() {
+        guard topToolbarSharesStatusRow,
+              let appliedTopInset,
+              abs(appliedTopInset - browserTopInset()) > 0.5 else {
+            return
+        }
+        
+        applyBrowserChromeLayout(animated: false)
     }
     
     private func applyFullscreenLayout() {
@@ -718,7 +1039,10 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         contentView.applyLayout(
             ContentView.LayoutState(mode: .standard),
             topAnchor: browserChrome.topToolbarBottomAnchor,
-            bottomAnchor: browserChrome.bottomToolbarTopAnchor
+            // With the buttons in the vertical bar there is no bottom toolbar for the page to end at.
+            bottomAnchor: browserLayout.toolbarPlacement == .verticalBar
+            ? view.bottomAnchor
+            : browserChrome.bottomToolbarTopAnchor
         )
         tabBar.setVisibility(.hidden, animated: false)
     }
@@ -765,6 +1089,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         let searchState = isShowingFullscreenMedia
         ? BrowserChrome.SearchState.inactive
         : (overlayCoordinator.chromeStateForAddressBarScrollDismissal(layout: browserLayout) ?? searchOverlayCoordinator.chromeState)
+        let topInset = browserTopInset()
+        appliedTopInset = topInset
         browserChrome.apply(state: BrowserChrome.State(
             position: browserLayout.chromePosition,
             mode: browserLayout.chromeMode,
@@ -772,8 +1098,10 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             ? .fullscreenMedia
             : (tabOverview.isPresented ? .tabOverview : .browsing),
             search: searchState,
-            topInset: browserTopInset(),
+            topInset: topInset,
             family: browserLayout.family,
+            toolbarPlacement: browserLayout.toolbarPlacement,
+            topToolbarSharesStatusRow: topToolbarSharesStatusRow,
             orientation: browserLayout.orientation,
             isTwoThirdSplitScreenOrSmaller: isSidebarOverlayLayout,
             sidebarButtonVisible: sidebarCoordinator.showChromeSidebarButton,
@@ -798,8 +1126,82 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             verticalSizeClass: traits.verticalSizeClass,
             windowSize: browserWindowSize(),
             hasSidebar: splitViewController is SidebarViewController,
-            tabletWindow: BrowserLayout.usesTabletWindowRules ? currentTabletWindow() : nil
+            tabletWindow: BrowserLayout.usesTabletWindowRules ? currentTabletWindow() : nil,
+            verticalBarEdge: heldVerticalBarEdge(in: traits),
+            hasSystemBars: navigationController != nil
         )
+    }
+    
+    /// The edge the system reports, or the one it last reported while the report is briefly withdrawn.
+    ///
+    /// When an iPhone Duo is opened its window loses the edge before it changes size and gets it back once it
+    /// has, with the size classes changing in between. Followed literally that is three layouts for one fold,
+    /// the first of them putting the toolbar back along the bottom for a fraction of a second. So an edge that
+    /// goes missing is kept until the window has stopped changing size and has still not reported one.
+    private func heldVerticalBarEdge(in traits: UITraitCollection) -> BrowserLayout.VerticalBarEdge {
+        let edge = verticalBarEdge(in: traits)
+        if edge != .none {
+            heldVerticalBarEdge = edge
+            verticalBarEdgeRelease?.cancel()
+            verticalBarEdgeRelease = nil
+            return edge
+        }
+        
+        if heldVerticalBarEdge != .none {
+            scheduleVerticalBarEdgeRelease()
+        }
+        return heldVerticalBarEdge
+    }
+    
+    private func scheduleVerticalBarEdgeRelease() {
+        guard verticalBarEdgeRelease == nil else {
+            return
+        }
+        
+        let release = DispatchWorkItem { [weak self] in
+            guard let self else {
+                return
+            }
+            
+            self.verticalBarEdgeRelease = nil
+            guard self.heldVerticalBarEdge != .none else {
+                return
+            }
+            
+            let traits = self.viewIfLoaded?.window?.traitCollection ?? self.traitCollection
+            guard self.verticalBarEdge(in: traits) == .none else {
+                return
+            }
+            
+            guard !self.isTransitioningSize else {
+                self.scheduleVerticalBarEdgeRelease()
+                return
+            }
+            
+            self.heldVerticalBarEdge = .none
+            if self.isViewLoaded, self.view.window != nil, !self.sidebarCoordinator.hostsSidebar {
+                self.updateBrowserLayout(animated: false)
+            }
+        }
+        verticalBarEdgeRelease = release
+        DispatchQueue.main.asyncAfter(deadline: .now() + UX.verticalBarEdgeHoldDuration, execute: release)
+    }
+    
+    private func verticalBarEdge(in traits: UITraitCollection) -> BrowserLayout.VerticalBarEdge {
+        guard #available(iOS 27.1, *) else {
+            return .none
+        }
+        
+        switch traits.verticalBarEdge {
+        case .leading:
+            return .leading
+        case .trailing:
+            return .trailing
+        case .unspecified:
+            return .none
+        @unknown default:
+            return .none
+        }
     }
     
     private func browserWindowSize() -> CGSize {
@@ -903,6 +1305,10 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     }
     
     private func browserTopInset() -> CGFloat {
+        if topToolbarSharesStatusRow,
+           let statusRowTopInset = browserChrome.statusRowTopInset() {
+            return statusRowTopInset
+        }
         return sidebarCoordinator.topInset(fallback: UX.fallbackTopInset)
     }
     
@@ -917,6 +1323,9 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     }
     
     /// Watches for a hinge, which tells an iPhone Duo from other iPhones before it is opened.
+    ///
+    /// Its first report is also when the system has finished telling a newly launched window where it is:
+    /// see `setNeedsSystemBarUpdate()`. A device that never reports one is taken to have settled after a while.
     private func observeHinge() {
         guard sidebarRole == .standalone,
               #available(iOS 27.1, *) else {
@@ -928,9 +1337,22 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
                 return
             }
             self?.requestSidebarHost()
+            self?.windowDidSettleAfterLaunch()
         }
         view.addInteraction(interaction)
         hingeInteraction = interaction
+        DispatchQueue.main.asyncAfter(deadline: .now() + UX.launchSettleAllowance) { [weak self] in
+            self?.windowDidSettleAfterLaunch()
+        }
+    }
+    
+    private func windowDidSettleAfterLaunch() {
+        guard !hasWindowSettledAfterLaunch else {
+            return
+        }
+        
+        hasWindowSettledAfterLaunch = true
+        setNeedsSystemBarUpdate()
     }
     
     private func requestSidebarHost() {
@@ -981,7 +1403,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         let restoresContentFocus = tabManager.selectedTab?.session.engineView?.isFirstResponder == true
         let isActive = window.windowScene?.activationState == .foregroundActive
         
-        if let hingeInteraction {
+        // The hinge is still listened to if it has not reported yet: see `observeHinge()`.
+        if let hingeInteraction, hasWindowSettledAfterLaunch {
             view.removeInteraction(hingeInteraction)
             self.hingeInteraction = nil
         }
@@ -1265,7 +1688,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     // MARK: - Browser UI Updates
     
     func syncBrowserNavigationChrome(animated: Bool) {
-        navigationController?.setNavigationBarHidden(true, animated: animated)
+        // The navigation bar is only ever shown as part of the system's vertical bar: see `updateSystemBars()`.
+        navigationController?.setNavigationBarHidden(systemBarContent == .none, animated: animated)
         navigationItem.leftItemsSupplementBackButton = false
         navigationItem.hidesBackButton = true
         navigationItem.leftBarButtonItems = []
