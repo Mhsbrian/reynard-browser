@@ -299,6 +299,12 @@ final class TabOverviewCollection: NSObject {
         layout.minimumLineSpacing = collectionItemSpacing
         layout.minimumInteritemSpacing = collectionItemSpacing
         let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        layout.foldedColumns = { [weak self, weak view] in
+            guard let view else {
+                return nil
+            }
+            return self?.tabOverview?.presentation.foldedColumns(in: view)
+        }
         view.translatesAutoresizingMaskIntoConstraints = false
         view.backgroundColor = .clear
         view.alwaysBounceVertical = true

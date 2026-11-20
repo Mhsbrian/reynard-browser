@@ -30,6 +30,9 @@ final class PrivateBrowsingSectionViewController: UIViewController {
     private var contentMode: HomepageContentMode = .embeddedNarrow
     private var isPrivateBrowsing = false
     
+    /// Keeps the card's words on one side of the fold of an iPhone Duo that is partly open.
+    private let foldReader = DisplayFoldReader()
+
     private let cardView: UIView = {
         let view = UIView()
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -141,6 +144,7 @@ final class PrivateBrowsingSectionViewController: UIViewController {
         view.addSubview(cardView)
         cardView.addSubview(backgroundView)
         cardView.addSubview(textContainerView)
+        foldReader.install(over: cardView, in: cardView.layoutMarginsGuide)
         textContainerView.addSubview(textStackView)
         textStackView.addArrangedSubview(titleLabel)
         textStackView.addArrangedSubview(messageLabel)
@@ -148,7 +152,7 @@ final class PrivateBrowsingSectionViewController: UIViewController {
     
     private func configureConstraints() {
         let preferredContentWidthConstraint = textContainerView.widthAnchor.constraint(
-            equalTo: cardView.layoutMarginsGuide.widthAnchor
+            equalTo: foldReader.sideGuide.widthAnchor
         )
         preferredContentWidthConstraint.priority = .defaultHigh
         
@@ -165,9 +169,9 @@ final class PrivateBrowsingSectionViewController: UIViewController {
             
             textContainerView.topAnchor.constraint(equalTo: cardView.layoutMarginsGuide.topAnchor),
             textContainerView.bottomAnchor.constraint(equalTo: cardView.layoutMarginsGuide.bottomAnchor),
-            textContainerView.centerXAnchor.constraint(equalTo: cardView.centerXAnchor),
-            textContainerView.leadingAnchor.constraint(greaterThanOrEqualTo: cardView.layoutMarginsGuide.leadingAnchor),
-            textContainerView.trailingAnchor.constraint(lessThanOrEqualTo: cardView.layoutMarginsGuide.trailingAnchor),
+            textContainerView.centerXAnchor.constraint(equalTo: foldReader.sideGuide.centerXAnchor),
+            textContainerView.leadingAnchor.constraint(greaterThanOrEqualTo: foldReader.sideGuide.leadingAnchor),
+            textContainerView.trailingAnchor.constraint(lessThanOrEqualTo: foldReader.sideGuide.trailingAnchor),
             textContainerView.widthAnchor.constraint(lessThanOrEqualToConstant: UX.maximumContentWidth),
             preferredContentWidthConstraint,
             

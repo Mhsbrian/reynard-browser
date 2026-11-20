@@ -41,6 +41,7 @@ final class FavoritesSectionViewController: UIViewController {
     private var displayedFavoriteItems: [BookmarkContentSnapshot] = []
     private var favoritesFolderGUID: String?
     private var contentMode: HomepageContentMode = .embeddedNarrow
+    private let foldReader = DisplayFoldReader()
     private var showsExpandedFavorites = false
     private var collectionHeightConstraint: NSLayoutConstraint?
     private var lastLaidOutWidth: CGFloat = -1
@@ -159,6 +160,11 @@ final class FavoritesSectionViewController: UIViewController {
         headerView.addSubview(titleLabel)
         headerView.addSubview(showAllButton)
         view.addSubview(collectionView)
+        // The grid's columns divide at the fold of an iPhone Duo that is partly open.
+        foldReader.install(over: view)
+        foldReader.onChange = { [weak self] _ in
+            self?.updateFavoriteGridLayout()
+        }
     }
     
     private func configureConstraints() {
@@ -351,11 +357,13 @@ final class FavoritesSectionViewController: UIViewController {
             return
         }
         
+        // The grid is as wide as this view, so the fold read over the view is the fold in the grid.
         let metrics = FavoritesLayoutMetrics(
             width: width,
             columnCount: contentMode.favoriteColumnCount,
             horizontalInset: UX.horizontalInset,
-            lineSpacing: UX.rowSpacing
+            lineSpacing: UX.rowSpacing,
+            foldBand: foldReader.reading.band
         )
         if abs(lastLaidOutWidth - width) > 0.5
             || collectionLayout.metrics != metrics {

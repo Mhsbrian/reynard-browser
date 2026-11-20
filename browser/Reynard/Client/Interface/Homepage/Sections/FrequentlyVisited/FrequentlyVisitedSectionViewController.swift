@@ -63,6 +63,8 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
         return scrollView
     }()
     
+    private let foldReader = DisplayFoldReader()
+
     private let cardStackView: UIStackView = {
         let stackView = UIStackView()
         stackView.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +125,10 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
         view.addSubview(titleLabel)
         view.addSubview(scrollView)
         scrollView.addSubview(cardStackView)
+        foldReader.install(over: view)
+        foldReader.onChange = { [weak self] _ in
+            self?.updateFoldSpacing()
+        }
     }
     
     private func configureConstraints() {
@@ -273,6 +279,37 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
             
             return cardView
         }
+        updateFoldSpacing()
+    }
+    
+    /// Where the fold of an iPhone Duo that is partly open runs through the row, the card that would lie in
+    /// it starts past it, and so do the cards after. The row still scrolls sideways, and cards pass the fold
+    /// as it does, like the content of any scrolling view.
+    private func updateFoldSpacing() {
+        for cardView in cardViews {
+            cardStackView.setCustomSpacing(UIStackView.spacingUseDefault, after: cardView)
+        }
+        guard let band = foldReader.reading.band else {
+            return
+        }
+        
+        // The cards start at this view's leading edge.
+        let isRightToLeft = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let nearEdge = isRightToLeft ? foldReader.reading.width - band.upperBound : band.lowerBound
+        let farEdge = isRightToLeft ? foldReader.reading.width - band.lowerBound : band.upperBound
+        let pitch = UX.cardWidth + UX.cardSpacing
+        let cardsBeforeFold = Int(floor((nearEdge + UX.cardSpacing) / pitch))
+        let nextCardOrigin = CGFloat(cardsBeforeFold) * pitch
+        guard cardsBeforeFold >= 1,
+              cardsBeforeFold < cardViews.count,
+              nextCardOrigin < farEdge else {
+            return
+        }
+        
+        cardStackView.setCustomSpacing(
+            farEdge - (nextCardOrigin - UX.cardSpacing),
+            after: cardViews[cardsBeforeFold - 1]
+        )
     }
     
     // MARK: - Actions

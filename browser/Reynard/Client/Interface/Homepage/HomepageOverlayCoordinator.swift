@@ -320,9 +320,11 @@ final class HomepageOverlayCoordinator {
                 showsBackground: false
             )
         case (.compact, _, .landscape), (.regular, .pad, _):
+            // Held to one side of the fold of an iPhone Duo, the panel has room for the narrow grid.
+            let isBesideFold = delegate?.homepageChrome.keepsOverlayBesideFold == true
             return HomepagePresentation(
                 host: .detached,
-                contentMode: HomepageContentMode.detached(layout: layout),
+                contentMode: isBesideFold ? .detachedNarrow : HomepageContentMode.detached(layout: layout),
                 showsBackground: false
             )
         default:

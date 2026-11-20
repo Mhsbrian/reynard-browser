@@ -27,6 +27,26 @@ final class TopToolbar: UIView {
         case compact
     }
     
+    /// Where the toolbar's content goes when something lies across its row: the fold of an iPhone Duo that is
+    /// partly open, or its inner camera while that is in use. Distances are from the toolbar's leading edge.
+    private struct ContentPlacement: Equatable {
+        struct Arrangement: Equatable {
+            /// How far the leading buttons start after the content guide's leading edge.
+            let leadingButtonsInset: CGFloat
+            /// How far the trailing buttons end before the content guide's trailing edge.
+            let trailingButtonsInset: CGFloat
+            let addressBar: ClosedRange<CGFloat>
+        }
+        
+        /// What is in the way. A change in this alone, with the toolbar's width as it was, is animated.
+        let obstacles: [ClosedRange<CGFloat>]
+        let width: CGFloat
+        /// nil where nothing is in the way, and the toolbar lays out as it does on every other device.
+        let arrangement: Arrangement?
+    }
+    
+    /// A fold or a camera has moved the toolbar's content, or let it back. Layout has yet to follow.
+    var onContentArrangementChange: (() -> Void)?
     var onSidebar: (() -> Void)?
     var onBack: (() -> Void)?
     var onForward: (() -> Void)?
@@ -159,6 +179,11 @@ final class TopToolbar: UIView {
     private var standardAddressBarConstraints: [NSLayoutConstraint] = []
     private var compactAddressBarConstraints: [NSLayoutConstraint] = []
     private var widthLimitedStandardAddressBarConstraints: [NSLayoutConstraint] = []
+    private var arrangedAddressBarConstraints: [NSLayoutConstraint] = []
+    private var leadingButtonsLeadingConstraint: NSLayoutConstraint!
+    private var trailingButtonsTrailingConstraint: NSLayoutConstraint!
+    private let contentPlacementTracker = DisplayFoldTracker<ContentPlacement>()
+    private var contentArrangement: ContentPlacement.Arrangement?
     
     private var layoutState: LayoutState = .hidden
     private var layoutFamily: BrowserLayout.Family = .compact
@@ -178,8 +203,14 @@ final class TopToolbar: UIView {
         fatalError("init(coder:) has not been implemented")
     }
     
+    override func updateConstraints() {
+        updateContentPlacement(animated: true)
+        super.updateConstraints()
+    }
+    
     override func layoutSubviews() {
         super.layoutSubviews()
+        updateContentPlacement(animated: true)
         updateStandardAddressBarLayout()
     }
     
@@ -205,6 +236,12 @@ final class TopToolbar: UIView {
                 addressBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: UX.topToolbarAddressBarVerticalSpacing),
                 addressBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -UX.topToolbarAddressBarVerticalSpacing),
             ]
+            arrangedAddressBarConstraints = [
+                addressBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+                addressBar.trailingAnchor.constraint(equalTo: leadingAnchor),
+                addressBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: UX.topToolbarAddressBarVerticalSpacing),
+                addressBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -UX.topToolbarAddressBarVerticalSpacing),
+            ]
             compactAddressBarConstraints = [
                 addressBar.leadingAnchor.constraint(
                     equalTo: barContentGuide.leadingAnchor,
@@ -221,8 +258,15 @@ final class TopToolbar: UIView {
     }
     
     func detachAddressBar() {
-        NSLayoutConstraint.deactivate(standardAddressBarConstraints + widthLimitedStandardAddressBarConstraints + compactAddressBarConstraints)
+        NSLayoutConstraint.deactivate(allAddressBarConstraints)
         isUsingStandardAddressBarWidthLimit = false
+    }
+    
+    private var allAddressBarConstraints: [NSLayoutConstraint] {
+        return standardAddressBarConstraints
+        + widthLimitedStandardAddressBarConstraints
+        + arrangedAddressBarConstraints
+        + compactAddressBarConstraints
     }
     
     func sharePopoverSourceView() -> UIView {
@@ -275,13 +319,15 @@ final class TopToolbar: UIView {
             libraryButton.isHidden = family == .regular
             downloadButton.isHidden = isCompact || !downloadButton.isShowingDownloads
             
-            NSLayoutConstraint.deactivate(standardAddressBarConstraints + widthLimitedStandardAddressBarConstraints + compactAddressBarConstraints)
+            NSLayoutConstraint.deactivate(allAddressBarConstraints)
             isUsingStandardAddressBarWidthLimit = false
             if isCompact {
                 NSLayoutConstraint.activate(compactAddressBarConstraints)
-            } else {
-                setStandardAddressBarWidthLimitEnabled(shouldLimitStandardAddressBarWidth)
             }
+            // The address bar's constraints were all taken off above, so what was applied no longer holds.
+            let placement = resolvedContentPlacement()
+            contentPlacementTracker.noteApplied(placement)
+            applyContentPlacement(placement)
             layoutIfNeeded()
         }
     }
@@ -407,6 +453,14 @@ final class TopToolbar: UIView {
         backgroundBottomConstraint = backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor)
         leadingWidthConstraint = leadingButtons.widthAnchor.constraint(equalToConstant: UX.topToolbarStandardButtonStackWidth)
         trailingWidthConstraint = trailingButtons.widthAnchor.constraint(equalToConstant: UX.topToolbarStandardButtonStackWidth)
+        leadingButtonsLeadingConstraint = leadingButtons.leadingAnchor.constraint(
+            equalTo: barContentGuide.leadingAnchor,
+            constant: UX.topToolbarHorizontalInset
+        )
+        trailingButtonsTrailingConstraint = trailingButtons.trailingAnchor.constraint(
+            equalTo: barContentGuide.trailingAnchor,
+            constant: -UX.topToolbarHorizontalInset
+        )
         
         barContentSafeAreaConstraints = [
             barContentGuide.leadingAnchor.constraint(equalTo: contentLayoutGuide.leadingAnchor),
@@ -439,12 +493,12 @@ final class TopToolbar: UIView {
             contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentView.heightAnchor.constraint(equalToConstant: UX.topToolbarContentHeight),
             
-            leadingButtons.leadingAnchor.constraint(equalTo: barContentGuide.leadingAnchor, constant: UX.topToolbarHorizontalInset),
+            leadingButtonsLeadingConstraint,
             leadingButtons.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             leadingWidthConstraint,
             leadingButtons.heightAnchor.constraint(equalToConstant: UX.topToolbarButtonStackHeight),
             
-            trailingButtons.trailingAnchor.constraint(equalTo: barContentGuide.trailingAnchor, constant: -UX.topToolbarHorizontalInset),
+            trailingButtonsTrailingConstraint,
             trailingButtons.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             trailingWidthConstraint,
             trailingButtons.heightAnchor.constraint(equalToConstant: UX.topToolbarButtonStackHeight),
@@ -497,6 +551,142 @@ final class TopToolbar: UIView {
         return safeAreaInsets
     }
     
+    // MARK: - Fold And Camera
+    
+    /// Keeps the toolbar's content out of the fold of an iPhone Duo that is partly open, and out from under
+    /// its inner camera while that is in use.
+    ///
+    /// Only what is in the way moves. Held like a book the fold runs through the address bar, which gives up
+    /// the part of it that crosses over and keeps the wider side; the buttons at the ends stay where they are.
+    /// The system reports both as reserved regions, and reports none on any other device.
+    private func updateContentPlacement(animated: Bool) {
+        let placement = resolvedContentPlacement()
+        let isObstacleChange = contentPlacementTracker.applied.map {
+            $0.width == placement.width && $0.obstacles != placement.obstacles
+        } ?? false
+        contentPlacementTracker.update(
+            in: self,
+            value: placement,
+            animated: animated && isObstacleChange,
+            current: { [weak self] in self?.resolvedContentPlacement() ?? placement },
+            apply: { [weak self] in self?.applyContentPlacement($0) }
+        )
+    }
+    
+    private func resolvedContentPlacement() -> ContentPlacement {
+        let width = bounds.width
+        guard layoutState == .standard, width > 0 else {
+            return ContentPlacement(obstacles: [], width: width, arrangement: nil)
+        }
+        
+        let row = CGRect(
+            x: 0,
+            y: contentTopConstraint.constant,
+            width: width,
+            height: UX.topToolbarContentHeight
+        )
+        var obstacleFrames: [CGRect] = []
+        if let fold = verticalDisplayFold(crossing: row), fold.isActive {
+            obstacleFrames.append(fold.frame)
+        }
+        // Elsewhere the system keeps what it reserves at the edges of the window, inside the safe area.
+        if sharesStatusRow {
+            obstacleFrames.append(contentsOf: displayOcclusions(crossing: row))
+        }
+        
+        let isRightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let insets = contentLayoutInsets
+        let contentStart = isRightToLeft ? insets.right : insets.left
+        let contentEnd = width - (isRightToLeft ? insets.left : insets.right)
+        let obstacles = obstacleFrames
+            .map { frame -> ClosedRange<CGFloat> in
+                isRightToLeft ? (width - frame.maxX)...(width - frame.minX) : frame.minX...frame.maxX
+            }
+            .filter { $0.upperBound > contentStart && $0.lowerBound < contentEnd }
+            .sorted { $0.lowerBound < $1.lowerBound }
+        guard !obstacles.isEmpty else {
+            return ContentPlacement(obstacles: [], width: width, arrangement: nil)
+        }
+        
+        func crosses(_ obstacle: ClosedRange<CGFloat>, _ start: CGFloat, _ end: CGFloat) -> Bool {
+            return obstacle.lowerBound < end && obstacle.upperBound > start
+        }
+        
+        // Buttons that would sit in an obstacle step past it, away from their own end of the toolbar.
+        let leadingWidth = leadingWidthConstraint.constant
+        var leadingStart = contentStart + UX.topToolbarHorizontalInset
+        for obstacle in obstacles where crosses(obstacle, leadingStart, leadingStart + leadingWidth) {
+            leadingStart = obstacle.upperBound
+        }
+        let trailingWidth = trailingWidthConstraint.constant
+        var trailingEnd = contentEnd - UX.topToolbarHorizontalInset
+        for obstacle in obstacles.reversed() where crosses(obstacle, trailingEnd - trailingWidth, trailingEnd) {
+            trailingEnd = obstacle.lowerBound
+        }
+        
+        // The address bar takes the widest clear stretch between them, and the leading one of two alike.
+        let end = trailingEnd - trailingWidth - UX.topToolbarAddressBarSpacing
+        var cursor = leadingStart + leadingWidth + UX.topToolbarAddressBarSpacing
+        var stretches: [ClosedRange<CGFloat>] = []
+        for obstacle in obstacles {
+            if min(obstacle.lowerBound, end) > cursor {
+                stretches.append(cursor...min(obstacle.lowerBound, end))
+            }
+            cursor = max(cursor, obstacle.upperBound)
+        }
+        if end > cursor {
+            stretches.append(cursor...end)
+        }
+        var addressBar: ClosedRange<CGFloat>?
+        for stretch in stretches {
+            let currentWidth = addressBar.map { $0.upperBound - $0.lowerBound } ?? 0
+            if stretch.upperBound - stretch.lowerBound > currentWidth + 0.5 {
+                addressBar = stretch
+            }
+        }
+        guard let addressBar else {
+            return ContentPlacement(obstacles: obstacles, width: width, arrangement: nil)
+        }
+        
+        return ContentPlacement(
+            obstacles: obstacles,
+            width: width,
+            arrangement: ContentPlacement.Arrangement(
+                leadingButtonsInset: leadingStart - contentStart,
+                trailingButtonsInset: contentEnd - trailingEnd,
+                addressBar: addressBar
+            )
+        )
+    }
+    
+    private func applyContentPlacement(_ placement: ContentPlacement) {
+        let arrangement = placement.arrangement
+        let isArrangementChange = arrangement != contentArrangement
+        defer {
+            if isArrangementChange {
+                onContentArrangementChange?()
+            }
+        }
+        contentArrangement = arrangement
+        leadingButtonsLeadingConstraint.constant = arrangement?.leadingButtonsInset ?? UX.topToolbarHorizontalInset
+        trailingButtonsTrailingConstraint.constant = -(arrangement?.trailingButtonsInset ?? UX.topToolbarHorizontalInset)
+        guard layoutState == .standard else {
+            return
+        }
+        
+        guard let arrangement, arrangedAddressBarConstraints.count == 4 else {
+            NSLayoutConstraint.deactivate(arrangedAddressBarConstraints)
+            setStandardAddressBarWidthLimitEnabled(shouldLimitStandardAddressBarWidth)
+            return
+        }
+        
+        NSLayoutConstraint.deactivate(standardAddressBarConstraints + widthLimitedStandardAddressBarConstraints)
+        isUsingStandardAddressBarWidthLimit = false
+        arrangedAddressBarConstraints[0].constant = arrangement.addressBar.lowerBound
+        arrangedAddressBarConstraints[1].constant = arrangement.addressBar.upperBound
+        NSLayoutConstraint.activate(arrangedAddressBarConstraints)
+    }
+    
     // MARK: - Status Row
     
     /// The system's region for a bar of this toolbar's height on the top edge. On the inner display of an
@@ -544,6 +734,11 @@ final class TopToolbar: UIView {
     }
     
     private func setStandardAddressBarWidthLimitEnabled(_ isEnabled: Bool) {
+        // Around a fold or a camera the address bar has a place of its own: see `ContentPlacement`.
+        guard contentArrangement == nil else {
+            return
+        }
+        
         let activeConstraints = isEnabled ? widthLimitedStandardAddressBarConstraints : standardAddressBarConstraints
         guard activeConstraints.contains(where: { !$0.isActive }) || isUsingStandardAddressBarWidthLimit != isEnabled else {
             return

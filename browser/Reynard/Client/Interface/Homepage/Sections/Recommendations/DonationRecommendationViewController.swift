@@ -74,6 +74,10 @@ final class DonationRecommendationViewController: UIViewController, HomepageReco
         return view
     }()
     
+    /// Keeps the card's words and buttons on one side of the fold of an iPhone Duo that is partly open. The
+    /// card itself stays as wide as it was.
+    private let foldReader = DisplayFoldReader()
+    
     private let textStackView: UIStackView = {
         let stackView = UIStackView()
         stackView.translatesAutoresizingMaskIntoConstraints = false
@@ -217,6 +221,7 @@ final class DonationRecommendationViewController: UIViewController, HomepageReco
         cardView.addSubview(backgroundView)
         cardView.addSubview(tintView)
         cardView.addSubview(textStackView)
+        foldReader.install(over: cardView, in: cardView.layoutMarginsGuide)
         
         textStackView.addArrangedSubview(titleLabel)
         textStackView.addArrangedSubview(messageLabel)
@@ -246,8 +251,8 @@ final class DonationRecommendationViewController: UIViewController, HomepageReco
             tintView.bottomAnchor.constraint(equalTo: cardView.bottomAnchor),
             
             textStackView.topAnchor.constraint(equalTo: cardView.layoutMarginsGuide.topAnchor),
-            textStackView.leadingAnchor.constraint(equalTo: cardView.layoutMarginsGuide.leadingAnchor),
-            textStackView.trailingAnchor.constraint(equalTo: cardView.layoutMarginsGuide.trailingAnchor),
+            textStackView.leadingAnchor.constraint(equalTo: foldReader.sideGuide.leadingAnchor),
+            textStackView.trailingAnchor.constraint(equalTo: foldReader.sideGuide.trailingAnchor),
             textStackView.bottomAnchor.constraint(equalTo: cardView.layoutMarginsGuide.bottomAnchor),
             
             coffeeImageView.widthAnchor.constraint(equalToConstant: UX.coffeeImageWidth),

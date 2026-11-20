@@ -44,6 +44,16 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         }
     }
     
+    /// What the fold of an iPhone Duo that is partly open does to what floats over the page: the action bar
+    /// and the overlay under the address bar each keep to one side of it. Distances are from the left edge.
+    private struct FoldPlacement: Equatable {
+        /// The band to keep clear, where the fold runs from top to bottom through this view.
+        let fold: ClosedRange<CGFloat>?
+        let width: CGFloat
+        /// The side the overlay stays on: the one its address bar is on.
+        let overlaySide: ClosedRange<CGFloat>?
+    }
+    
     struct State {
         let position: BrowserChromePosition
         let mode: BrowserChromeMode
@@ -78,6 +88,8 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     var onFindInPageVisibilityChanged: ((Bool) -> Void)?
     var onKeyboardDismissal: (() -> Void)?
     var onToolbarExpansionRequested: (() -> Void)?
+    /// The overlay under the address bar began or stopped keeping to one side of a fold.
+    var onOverlayFoldSideChanged: (() -> Void)?
     
     let addressBar: AddressBar = {
         let view = AddressBar()
@@ -127,6 +139,12 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     private var actionBarDockOffset: CGFloat = 0
     private var actionBarEdgeConstraints: [NSLayoutConstraint] = []
     private var actionBarSafeAreaConstraints: [NSLayoutConstraint] = []
+    private var actionBarSideConstraints: [NSLayoutConstraint] = []
+    private var overlaySideConstraints: [NSLayoutConstraint] = []
+    private let foldPlacementTracker = DisplayFoldTracker<FoldPlacement>()
+    private var foldPlacement: FoldPlacement?
+    /// The top toolbar has moved its address bar for a fold or a camera, and has yet to be laid out.
+    private var needsOverlayWidthForArrangedAddressBar = false
     private var modernActionBarDismissalID: UUID?
     
     private var state: State?
@@ -147,6 +165,12 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         configureConstraints()
         configureToolbarActions()
         configureOverlayDismissGesture()
+        topToolbar.onContentArrangementChange = { [weak self] in
+            // The fold of an iPhone Duo changes the address bar's width under a window that stays the size it
+            // was. Nothing else lays this view out again, and the overlay would keep the width it had.
+            self?.needsOverlayWidthForArrangedAddressBar = true
+            self?.setNeedsLayout()
+        }
     }
     
     required init?(coder: NSCoder) {
@@ -167,8 +191,19 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         return hitView === self ? nil : hitView
     }
     
+    override func updateConstraints() {
+        updateFoldPlacement(animated: true)
+        super.updateConstraints()
+    }
+    
     override func layoutSubviews() {
         super.layoutSubviews()
+        updateFoldPlacement(animated: true)
+        if needsOverlayWidthForArrangedAddressBar {
+            // The overlay follows the address bar's width, which the toolbar's own layout gives it.
+            needsOverlayWidthForArrangedAddressBar = false
+            topToolbar.layoutIfNeeded()
+        }
         updateOverlayWidth()
     }
     
@@ -257,10 +292,7 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         addressBar.updateLayout(position: state.position, chromeMode: state.mode)
         attachAddressBar(for: state.mode)
         attachActionBar(for: state.mode)
-        // Beside a vertical bar, what sits above the address bar ends where the address bar does.
-        let keepsActionBarInsideSafeArea = state.toolbarPlacement == .verticalBar
-        NSLayoutConstraint.deactivate(keepsActionBarInsideSafeArea ? actionBarEdgeConstraints : actionBarSafeAreaConstraints)
-        NSLayoutConstraint.activate(keepsActionBarInsideSafeArea ? actionBarSafeAreaConstraints : actionBarEdgeConstraints)
+        applyActionBarHorizontalConstraints()
         configureOverlayPositioningIfNeeded()
         overlayContentView.setLayoutMode(overlayLayoutMode(for: state))
         updateOverlayWidth()
@@ -502,7 +534,92 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     }
     
     private func updateOverlayWidth() {
-        overlayWidthConstraint.constant = overlayContentView.layoutMode.resolvedWidth(addressBarWidth: addressBar.bounds.width)
+        var width = overlayContentView.layoutMode.resolvedWidth(addressBarWidth: addressBar.bounds.width)
+        if let side = foldPlacement?.overlaySide {
+            width = min(width, side.upperBound - side.lowerBound)
+        }
+        if abs(overlayWidthConstraint.constant - width) > 0.5 {
+            overlayWidthConstraint.constant = width
+        }
+    }
+    
+    // MARK: - Fold
+    
+    /// Keeps the action bar and the overlay under the address bar on one side of the fold of an iPhone Duo
+    /// that is partly open. Nothing else in this view spans the window: the toolbars and the tab strip look
+    /// after themselves. No other device reports a fold, and there this changes nothing.
+    private func updateFoldPlacement(animated: Bool) {
+        let placement = resolvedFoldPlacement()
+        let isFoldChange = foldPlacementTracker.applied.map {
+            $0.width == placement.width && $0.fold != placement.fold
+        } ?? false
+        foldPlacementTracker.update(
+            in: self,
+            value: placement,
+            animated: animated && isFoldChange,
+            current: { [weak self] in self?.resolvedFoldPlacement() ?? placement },
+            apply: { [weak self] in self?.applyFoldPlacement($0) }
+        )
+    }
+    
+    private func resolvedFoldPlacement() -> FoldPlacement {
+        let width = bounds.width
+        guard let band = activeFoldBand(crossing: bounds) else {
+            return FoldPlacement(fold: nil, width: width, overlaySide: nil)
+        }
+        
+        let addressBarCenter = addressBar.convert(
+            CGPoint(x: addressBar.bounds.midX, y: addressBar.bounds.midY),
+            to: self
+        ).x
+        let overlaySide = addressBarCenter < (band.lowerBound + band.upperBound) / 2
+        ? 0...band.lowerBound
+        : band.upperBound...width
+        return FoldPlacement(fold: band, width: width, overlaySide: overlaySide)
+    }
+    
+    /// Whether the overlay under the address bar is held to one side of the fold of an iPhone Duo that is
+    /// partly open, which leaves it about half the room it has otherwise.
+    var keepsOverlayBesideFold: Bool {
+        return foldPlacement?.overlaySide != nil
+    }
+    
+    private func applyFoldPlacement(_ placement: FoldPlacement) {
+        let wasBesideFold = keepsOverlayBesideFold
+        foldPlacement = placement
+        if wasBesideFold != keepsOverlayBesideFold {
+            onOverlayFoldSideChanged?()
+        }
+        applyActionBarHorizontalConstraints()
+        
+        if let side = placement.overlaySide, overlaySideConstraints.count == 2 {
+            overlaySideConstraints[0].constant = side.lowerBound
+            overlaySideConstraints[1].constant = side.upperBound
+            NSLayoutConstraint.activate(overlaySideConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(overlaySideConstraints)
+        }
+        updateOverlayWidth()
+    }
+    
+    /// The action bar runs from edge to edge, stops at a vertical bar's column, or keeps to the wider side of
+    /// the fold, which is the leading one where both are alike.
+    private func applyActionBarHorizontalConstraints() {
+        NSLayoutConstraint.deactivate(actionBarEdgeConstraints + actionBarSafeAreaConstraints + actionBarSideConstraints)
+        if let fold = foldPlacement?.fold, let width = foldPlacement?.width {
+            let leftWidth = fold.lowerBound
+            let rightWidth = width - fold.upperBound
+            let prefersLeft = effectiveUserInterfaceLayoutDirection == .leftToRight
+            let usesLeft = abs(leftWidth - rightWidth) <= 1 ? prefersLeft : leftWidth > rightWidth
+            actionBarSideConstraints[0].constant = usesLeft ? 0 : fold.upperBound
+            actionBarSideConstraints[1].constant = usesLeft ? fold.lowerBound : width
+            NSLayoutConstraint.activate(actionBarSideConstraints)
+            return
+        }
+        
+        // Beside a vertical bar, what sits above the address bar ends where the address bar does.
+        let keepsActionBarInsideSafeArea = state?.toolbarPlacement == .verticalBar
+        NSLayoutConstraint.activate(keepsActionBarInsideSafeArea ? actionBarSafeAreaConstraints : actionBarEdgeConstraints)
     }
     
     private func overlayLayoutMode(for state: State) -> ChromeOverlayContentView.LayoutMode {
@@ -529,7 +646,9 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
             equalTo: addressBar.bottomAnchor,
             constant: UX.overlayTopSpacing
         )
+        // Just short of required, so that the fold of an iPhone Duo can hold the overlay to one side.
         let centerXConstraint = overlayContentView.centerXAnchor.constraint(equalTo: addressBar.centerXAnchor)
+        centerXConstraint.priority = UILayoutPriority(UILayoutPriority.required.rawValue - 1)
         NSLayoutConstraint.activate([topConstraint, centerXConstraint])
         overlayTopConstraint = topConstraint
         overlayCenterXConstraint = centerXConstraint
@@ -953,6 +1072,15 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         actionBarSafeAreaConstraints = [
             actionBar.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
             actionBar.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        ]
+        // Left and right: the fold is a place on the hardware, whatever the language.
+        actionBarSideConstraints = [
+            actionBar.leftAnchor.constraint(equalTo: leftAnchor),
+            actionBar.rightAnchor.constraint(equalTo: leftAnchor),
+        ]
+        overlaySideConstraints = [
+            overlayContentView.leftAnchor.constraint(greaterThanOrEqualTo: leftAnchor),
+            overlayContentView.rightAnchor.constraint(lessThanOrEqualTo: leftAnchor),
         ]
         NSLayoutConstraint.activate(actionBarEdgeConstraints)
         topToolbar.extendBackground(to: tabBar.bottomAnchor)

@@ -671,6 +671,15 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
                 self?.requestContentKeyboardFocus()
             }
         }
+        browserChrome.onOverlayFoldSideChanged = { [weak self] in
+            // Reported from inside a layout pass, and the homepage's grid is chosen outside one.
+            DispatchQueue.main.async {
+                guard let self, self.isViewLoaded, self.view.window != nil else {
+                    return
+                }
+                self.homepageOverlayCoordinator.updatePresentation(animated: false)
+            }
+        }
         browserChrome.onKeyboardDismissal = { [weak self] in
             self?.tabManager.selectedTab?.session.dismissSoftwareKeyboard()
         }

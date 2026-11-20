@@ -22,11 +22,36 @@ struct FavoritesLayoutMetrics: Equatable {
     let itemSize: CGSize
     let interitemSpacing: CGFloat
     let lineSpacing: CGFloat
+    /// The left edge of each column where the grid divides at the fold of an iPhone Duo that is partly open,
+    /// and nil everywhere else: see `FoldedColumns`.
+    let foldedColumnOrigins: [CGFloat]?
     
-    init(width: CGFloat, columnCount: Int, horizontalInset: CGFloat, lineSpacing: CGFloat) {
+    /// - Parameter foldBand: The band the fold keeps clear, in the grid's coordinates, where there is one.
+    init(
+        width: CGFloat,
+        columnCount: Int,
+        horizontalInset: CGFloat,
+        lineSpacing: CGFloat,
+        foldBand: ClosedRange<CGFloat>? = nil
+    ) {
         self.columnCount = max(columnCount, 1)
         self.horizontalInset = horizontalInset
         self.lineSpacing = lineSpacing
+        if let foldBand, width - horizontalInset > horizontalInset {
+            let columns = FoldedColumns(
+                count: self.columnCount,
+                span: horizontalInset...(width - horizontalInset),
+                band: foldBand,
+                spacing: UX.minimumInteritemSpacing,
+                maximumItemWidth: UX.maximumIconSize
+            )
+            foldedColumnOrigins = columns.origins
+            interitemSpacing = UX.minimumInteritemSpacing
+            itemSize = CGSize(width: columns.itemWidth, height: columns.itemWidth + UX.titleHeight)
+            return
+        }
+        
+        foldedColumnOrigins = nil
         let contentWidth = max(width - (horizontalInset * 2), 1)
         let totalMinimumSpacing = CGFloat(max(self.columnCount - 1, 0)) * UX.minimumInteritemSpacing
         let availableIconWidth = (contentWidth - totalMinimumSpacing) / CGFloat(self.columnCount)
@@ -151,7 +176,8 @@ final class FavoritesCollectionViewLayout: UICollectionViewLayout {
     private func frame(forItemAt item: Int, metrics: FavoritesLayoutMetrics) -> CGRect {
         let row = item / metrics.columnCount
         let column = item % metrics.columnCount
-        let x = metrics.horizontalInset + CGFloat(column) * (metrics.itemSize.width + metrics.interitemSpacing)
+        let x = metrics.foldedColumnOrigins?[safe: column]
+        ?? metrics.horizontalInset + CGFloat(column) * (metrics.itemSize.width + metrics.interitemSpacing)
         let y = FavoritesLayoutMetrics.shadowPadding + CGFloat(row) * (metrics.itemSize.height + metrics.lineSpacing)
         return CGRect(origin: CGPoint(x: x, y: y), size: metrics.itemSize)
     }

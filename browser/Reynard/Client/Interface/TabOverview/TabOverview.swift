@@ -133,6 +133,13 @@ final class TabOverview: UIView {
     private var privateTabsCollectionBottomToToolbarConstraint: NSLayoutConstraint!
     
     private var appliesNextTabChangesWithoutAnimation = false
+    private let foldReader = DisplayFoldReader()
+    
+    /// The fold of an iPhone Duo where it runs through the overview, in this view's coordinates. The grid
+    /// has an even number of columns wherever there is one, and divides at it while the phone is partly open.
+    var foldReading: DisplayFoldReader.Reading {
+        return foldReader.reading
+    }
     
     // MARK: - Lifecycle
     
@@ -292,6 +299,10 @@ final class TabOverview: UIView {
     }
     
     private func configureHierarchy() {
+        foldReader.install(over: self)
+        foldReader.onChange = { [weak self] _ in
+            self?.collection.invalidateCardLayouts()
+        }
         addSubview(collection.privateTabsCollectionView)
         addSubview(collection.regularTabsCollectionView)
         addSubview(statusBarBlurView)

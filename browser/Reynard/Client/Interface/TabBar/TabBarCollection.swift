@@ -41,8 +41,55 @@ private final class TabBarCollectionLayout: UICollectionViewFlowLayout {
         insertedIndexPaths.removeAll()
     }
     
+    // MARK: Fold
+    
+    /// How far the tabs after the fold of an iPhone Duo move along, so that the first of them starts where
+    /// the fold ends. Zero wherever there is no fold.
+    private var foldShift: (firstIndex: Int, distance: CGFloat) {
+        guard let split = tabBar?.foldSplit else {
+            return (0, 0)
+        }
+        
+        let firstAfterFold = IndexPath(item: split.leadingTabCount, section: 0)
+        guard let collectionView,
+              split.leadingTabCount < collectionView.numberOfItems(inSection: 0),
+              let origin = super.layoutAttributesForItem(at: firstAfterFold)?.frame.minX else {
+            return (0, 0)
+        }
+        return (split.leadingTabCount, max(0, split.trailingOrigin - origin))
+    }
+    
+    private func afterFold(
+        _ attributes: UICollectionViewLayoutAttributes?,
+        shift: (firstIndex: Int, distance: CGFloat)
+    ) -> UICollectionViewLayoutAttributes? {
+        guard let attributes,
+              shift.distance > 0,
+              attributes.representedElementCategory == .cell,
+              attributes.indexPath.item >= shift.firstIndex,
+              let moved = attributes.copy() as? UICollectionViewLayoutAttributes else {
+            return attributes
+        }
+        
+        moved.frame.origin.x += shift.distance
+        return moved
+    }
+    
+    override var collectionViewContentSize: CGSize {
+        var size = super.collectionViewContentSize
+        size.width += foldShift.distance
+        return size
+    }
+    
+    override func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+        return afterFold(super.layoutAttributesForItem(at: indexPath), shift: foldShift)
+    }
+    
     override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
-        var attributes = super.layoutAttributesForElements(in: rect) ?? []
+        let shift = foldShift
+        var attributes = (super.layoutAttributesForElements(
+            in: shift.distance > 0 ? rect.union(rect.offsetBy(dx: -shift.distance, dy: 0)) : rect
+        ) ?? []).compactMap { afterFold($0, shift: shift) }
         guard let collectionView,
               let dataSourceTabCount = tabBar?.dataSource?.tabs.count else {
             return attributes
@@ -89,6 +136,11 @@ private final class TabBarCollectionLayout: UICollectionViewFlowLayout {
             return false
         }
         
+        // The fold is its own separator between the tabs either side of it.
+        if let split = tabBar.foldSplit, index == split.leadingTabCount - 1 {
+            return false
+        }
+        
         return !tabBar.isTabSelected(at: index) && !tabBar.isTabSelected(at: index + 1)
     }
     
@@ -96,8 +148,8 @@ private final class TabBarCollectionLayout: UICollectionViewFlowLayout {
         after index: Int,
         in rect: CGRect?
     ) -> UICollectionViewLayoutAttributes? {
-        guard let leftAttributes = super.layoutAttributesForItem(at: IndexPath(item: index, section: 0)),
-              let rightAttributes = super.layoutAttributesForItem(at: IndexPath(item: index + 1, section: 0)) else {
+        guard let leftAttributes = layoutAttributesForItem(at: IndexPath(item: index, section: 0)),
+              let rightAttributes = layoutAttributesForItem(at: IndexPath(item: index + 1, section: 0)) else {
             return nil
         }
         
@@ -142,6 +194,7 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
     private weak var tabBar: TabBar?
     private let layout: TabBarCollectionLayout
     private var lastLayoutWidth: CGFloat = 0
+    private let foldBandTracker = DisplayFoldTracker<FoldBand>()
     private var isUpdatingTabs = false
     private var needsReload = false
     private var pendingInsertedIndices = Set<Int>()
@@ -158,6 +211,15 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
     
     private(set) var dragSourceIndex: Int?
     private(set) var dragDestinationIndex: Int?
+    
+    private struct FoldBand: Equatable {
+        let band: ClosedRange<CGFloat>?
+        let width: CGFloat
+    }
+    
+    /// The band of the strip the fold of an iPhone Duo runs through while the phone is partly open, measured
+    /// from the strip's leading edge. The tabs divide either side of it: see `TabBar.foldSplit`.
+    private(set) var foldBand: ClosedRange<CGFloat>?
     
     init() {
         let layout = TabBarCollectionLayout()
@@ -185,6 +247,7 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
     }
     
     override func layoutSubviews() {
+        updateFoldBand()
         let widthChanged = abs(lastLayoutWidth - bounds.width) > 0.5
         super.layoutSubviews()
         guard widthChanged else {
@@ -195,6 +258,46 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
             return
         }
         updateScrollability()
+        refreshVisibleTabs()
+        revealSelectedTab()
+    }
+    
+    // MARK: - Fold
+    
+    private func updateFoldBand() {
+        let value = resolvedFoldBand()
+        let isFoldChange = foldBandTracker.applied.map {
+            $0.width == value.width && $0.band != value.band
+        } ?? false
+        foldBandTracker.update(
+            in: self,
+            value: value,
+            animated: isFoldChange && !isUpdatingTabs,
+            current: { [weak self] in self?.resolvedFoldBand() ?? value },
+            apply: { [weak self] in self?.applyFoldBand($0) }
+        )
+    }
+    
+    private func resolvedFoldBand() -> FoldBand {
+        // The frame is in this view's bounds, which move as it scrolls.
+        let visibleBounds = bounds
+        guard let band = activeFoldBand(crossing: visibleBounds) else {
+            return FoldBand(band: nil, width: visibleBounds.width)
+        }
+        
+        var lowerBound = band.lowerBound - visibleBounds.minX
+        var upperBound = band.upperBound - visibleBounds.minX
+        // The layout counts from the leading edge, and the system mirrors it for a right-to-left language.
+        if effectiveUserInterfaceLayoutDirection == .rightToLeft {
+            (lowerBound, upperBound) = (visibleBounds.width - upperBound, visibleBounds.width - lowerBound)
+        }
+        return FoldBand(band: lowerBound...max(lowerBound, upperBound), width: visibleBounds.width)
+    }
+    
+    private func applyFoldBand(_ value: FoldBand) {
+        foldBand = value.band
+        updateScrollability()
+        collectionViewLayout.invalidateLayout()
         refreshVisibleTabs()
         revealSelectedTab()
     }
@@ -327,6 +430,11 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
                 return false
             }
             
+            // Divided at a fold the tabs fit their sides: `TabBar.foldSplit` is nil when they do not.
+            if foldBand != nil, tabBar?.foldSplit != nil {
+                return false
+            }
+            
             let equalWidth = floor(availableWidth / CGFloat(tabCount))
             guard equalWidth < TabBarCell.expandedMinimumWidth else {
                 return false
@@ -347,6 +455,9 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
         }()
         
         isScrollEnabled = shouldScroll
+        if !shouldScroll, foldBand != nil, contentOffset.x != -adjustedContentInset.left {
+            contentOffset.x = -adjustedContentInset.left
+        }
     }
     
     private func refreshVisibleTabs() {

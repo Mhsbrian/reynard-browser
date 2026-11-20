@@ -51,6 +51,8 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
         return button
     }()
     
+    private let foldReader = DisplayFoldReader()
+
     private let collectionLayout: UICollectionViewFlowLayout = {
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
@@ -140,6 +142,10 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
         view.addSubview(titleLabel)
         view.addSubview(clearAllButton)
         view.addSubview(collectionView)
+        foldReader.install(over: view)
+        foldReader.onChange = { [weak self] _ in
+            self?.updateCollectionLayout()
+        }
     }
     
     private func configureConstraints() {
@@ -253,13 +259,37 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
             return
         }
         
-        let columnCount = max(contentMode.recentlyCloseTabsColumnCount, 1)
-        let spacingWidth = CGFloat(columnCount - 1) * UX.columnSpacing
-        let horizontalInset = collectionLayout.sectionInset.left + collectionLayout.sectionInset.right
-        let itemWidth = max(1, floor((width - horizontalInset - spacingWidth) / CGFloat(columnCount)))
+        // Either side of the fold of an iPhone Duo that is partly open. The grid reaches a shadow's width
+        // past this view on each side, which is where the fold was read.
+        var sectionInset = collectionLayout.sectionInset
+        sectionInset.left = UX.shadowMargin
+        sectionInset.right = UX.shadowMargin
+        var columnSpacing = UX.columnSpacing
+        var foldItemWidth: CGFloat?
+        if let band = foldReader.reading.band {
+            let leftWidth = band.lowerBound
+            let rightWidth = width - (UX.shadowMargin * 2) - band.upperBound
+            if columnCount == 2, leftWidth > 0, rightWidth > 0 {
+                // Two columns, one each side: the room left over between them covers the fold.
+                foldItemWidth = max(1, floor(min(leftWidth, rightWidth)))
+                columnSpacing = max(columnSpacing, band.upperBound - band.lowerBound)
+            } else if leftWidth >= rightWidth {
+                sectionInset.right += width - (UX.shadowMargin * 2) - band.lowerBound
+            } else {
+                sectionInset.left += band.upperBound
+            }
+        }
+        
+        let spacingWidth = CGFloat(columnCount - 1) * columnSpacing
+        let horizontalInset = sectionInset.left + sectionInset.right
+        let itemWidth = foldItemWidth ?? max(1, floor((width - horizontalInset - spacingWidth) / CGFloat(columnCount)))
         if abs(lastLaidOutWidth - width) > 0.5
-            || collectionLayout.itemSize.width != itemWidth {
+            || collectionLayout.itemSize.width != itemWidth
+            || collectionLayout.sectionInset != sectionInset
+            || collectionLayout.minimumInteritemSpacing != columnSpacing {
             lastLaidOutWidth = width
+            collectionLayout.sectionInset = sectionInset
+            collectionLayout.minimumInteritemSpacing = columnSpacing
             collectionLayout.itemSize = CGSize(width: itemWidth, height: UX.pillHeight)
             collectionLayout.invalidateLayout()
         }
@@ -267,8 +297,19 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
         updateCollectionHeight()
     }
     
-    private func updateCollectionHeight() {
+    /// A grid that the fold of an iPhone Duo crosses has an even number of columns, open or partly open, so
+    /// that it divides at the fold without rearranging.
+    private var columnCount: Int {
         let columnCount = max(contentMode.recentlyCloseTabsColumnCount, 1)
+        guard foldReader.reading.hasFold,
+              columnCount > 2,
+              !columnCount.isMultiple(of: 2) else {
+            return columnCount
+        }
+        return columnCount - 1
+    }
+    
+    private func updateCollectionHeight() {
         let rowCount = Int(ceil(CGFloat(closedTabs.count) / CGFloat(columnCount)))
         let verticalInset = collectionLayout.sectionInset.top + collectionLayout.sectionInset.bottom
         let contentHeight = rowCount == 0

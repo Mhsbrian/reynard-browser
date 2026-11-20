@@ -14,6 +14,37 @@ final class TabOverviewCollectionLayout: UICollectionViewFlowLayout {
     
     private var insertedCardIndexPaths = Set<IndexPath>()
     
+    /// The columns either side of the fold of an iPhone Duo that is partly open, where the grid divides.
+    /// Nil everywhere else, and then the cards are where a flow layout puts them.
+    var foldedColumns: (() -> FoldedColumns?)?
+    
+    private func dividedAtFold(_ attributes: UICollectionViewLayoutAttributes?) -> UICollectionViewLayoutAttributes? {
+        guard let attributes,
+              attributes.representedElementCategory == .cell,
+              let columns = foldedColumns?(),
+              !columns.origins.isEmpty,
+              let moved = attributes.copy() as? UICollectionViewLayoutAttributes else {
+            return attributes
+        }
+        
+        moved.frame.origin.x = columns.origins[attributes.indexPath.item % columns.origins.count]
+        return moved
+    }
+    
+    override func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+        return dividedAtFold(super.layoutAttributesForItem(at: indexPath))
+    }
+    
+    override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
+        guard foldedColumns?() != nil else {
+            return super.layoutAttributesForElements(in: rect)
+        }
+        
+        // A card may move sideways out of or into `rect`: ask for the whole width of its rows.
+        let rows = CGRect(x: 0, y: rect.minY, width: collectionViewContentSize.width, height: rect.height)
+        return super.layoutAttributesForElements(in: rows)?.compactMap { dividedAtFold($0) }
+    }
+    
     override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
         guard let collectionView else {
             return super.shouldInvalidateLayout(forBoundsChange: newBounds)

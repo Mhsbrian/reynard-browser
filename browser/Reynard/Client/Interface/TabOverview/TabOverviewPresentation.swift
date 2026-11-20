@@ -14,6 +14,7 @@ final class TabOverviewPresentation {
         static let phoneCardTargetWidth: CGFloat = 170
         static let padCardTargetWidth: CGFloat = 250
         static let minimumTabCardColumnCount = 2
+        static let evenColumnMinimumWidthRatio: CGFloat = 0.8
         static let cardMetadataHeight: CGFloat = 22
         static let hiddenCollectionVerticalOffset: CGFloat = 26
         static let presentedPageScaleReduction: CGFloat = 0.08
@@ -79,17 +80,62 @@ final class TabOverviewPresentation {
         let horizontalInsets = collectionView.adjustedContentInset.left + collectionView.adjustedContentInset.right
         let availableWidth = collectionView.bounds.width - horizontalInsets
         let tabViewAspectRatio = max(UX.cardMinimumPreviewAspectRatio, tabOverview.previewAspectRatio)
+        let columns = columnCount(in: collectionView)
         
+        let totalSpacing = CGFloat(columns - 1) * UX.cardCollectionItemSpacing
+        let itemWidth = foldedColumns(in: collectionView).map { floor($0.itemWidth) }
+        ?? floor((availableWidth - totalSpacing) / CGFloat(columns))
+        let itemHeight = floor((itemWidth * tabViewAspectRatio) + UX.cardMetadataHeight)
+        return CGSize(width: itemWidth, height: itemHeight)
+    }
+    
+    private func columnCount(in collectionView: UICollectionView) -> Int {
+        let horizontalInsets = collectionView.adjustedContentInset.left + collectionView.adjustedContentInset.right
+        let availableWidth = collectionView.bounds.width - horizontalInsets
         let targetWidth = context.browserLayout.chromeMode == .phone
         ? UX.phoneCardTargetWidth
         : UX.padCardTargetWidth
         let computedColumns = Int((availableWidth + UX.cardCollectionItemSpacing) / (targetWidth + UX.cardCollectionItemSpacing))
         let columns = max(UX.minimumTabCardColumnCount, computedColumns)
         
-        let totalSpacing = CGFloat(columns - 1) * UX.cardCollectionItemSpacing
-        let itemWidth = floor((availableWidth - totalSpacing) / CGFloat(columns))
-        let itemHeight = floor((itemWidth * tabViewAspectRatio) + UX.cardMetadataHeight)
-        return CGSize(width: itemWidth, height: itemHeight)
+        // A grid that the fold of an iPhone Duo crosses has an even number of columns, open or partly open,
+        // so that it divides at the fold without rearranging: one more where the cards stay near their
+        // size, and one fewer where they would not.
+        guard tabOverview.foldReading.hasFold, !columns.isMultiple(of: 2) else {
+            return columns
+        }
+        
+        let widthWithOneMore = (availableWidth - CGFloat(columns) * UX.cardCollectionItemSpacing) / CGFloat(columns + 1)
+        return widthWithOneMore >= targetWidth * UX.evenColumnMinimumWidthRatio
+        ? columns + 1
+        : max(columns - 1, UX.minimumTabCardColumnCount)
+    }
+    
+    /// The columns either side of the fold of an iPhone Duo that is partly open, in the coordinates of the
+    /// collection view's content. Nil where there is no fold to keep clear.
+    func foldedColumns(in collectionView: UICollectionView) -> FoldedColumns? {
+        guard let band = tabOverview.foldReading.band else {
+            return nil
+        }
+        
+        let insets = collectionView.adjustedContentInset
+        let availableWidth = collectionView.bounds.width - insets.left - insets.right
+        let contentOrigin = collectionView.frame.minX + insets.left
+        guard availableWidth > 0 else {
+            return nil
+        }
+        
+        var contentBand = (band.lowerBound - contentOrigin)...(band.upperBound - contentOrigin)
+        // The layout counts from the leading edge, and the system mirrors it for a right-to-left language.
+        if collectionView.effectiveUserInterfaceLayoutDirection == .rightToLeft {
+            contentBand = (availableWidth - contentBand.upperBound)...(availableWidth - contentBand.lowerBound)
+        }
+        return FoldedColumns(
+            count: columnCount(in: collectionView),
+            span: 0...availableWidth,
+            band: contentBand,
+            spacing: UX.cardCollectionItemSpacing
+        )
     }
     
     func refreshForCurrentOrientation() {
