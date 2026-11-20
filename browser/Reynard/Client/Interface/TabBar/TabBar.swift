@@ -62,6 +62,20 @@ final class TabBar: UIView {
     private lazy var presentation = TabBarPresentation(tabBar: self)
     
     private var heightConstraint: NSLayoutConstraint!
+    private var edgeConstraints: [NSLayoutConstraint] = []
+    private var safeAreaConstraints: [NSLayoutConstraint] = []
+    
+    /// Keeps the tabs clear of what the system puts at the sides of the window, which is where the inner
+    /// display of an iPhone Duo has its status items. The background still runs from edge to edge.
+    var keepsTabsInsideSafeArea = false {
+        didSet {
+            guard keepsTabsInsideSafeArea != oldValue else {
+                return
+            }
+            NSLayoutConstraint.deactivate(keepsTabsInsideSafeArea ? edgeConstraints : safeAreaConstraints)
+            NSLayoutConstraint.activate(keepsTabsInsideSafeArea ? safeAreaConstraints : edgeConstraints)
+        }
+    }
     
     // MARK: - Lifecycle
     
@@ -95,6 +109,17 @@ final class TabBar: UIView {
     
     func invalidateLayout() {
         tabCollection.invalidateLayout()
+    }
+    
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        guard keepsTabsInsideSafeArea else {
+            return
+        }
+        
+        // The room for tabs changed without the bar changing size: a sidebar came or went beside the page.
+        layoutIfNeeded()
+        invalidateLayout()
     }
     
     func updateLayout() {
@@ -262,9 +287,15 @@ final class TabBar: UIView {
     private func configureConstraints() {
         heightConstraint = heightAnchor.constraint(equalToConstant: 0)
         let tabCollectionHeightConstraint = tabCollection.heightAnchor.constraint(equalToConstant: UX.tabBarHeight)
-        NSLayoutConstraint.activate([
+        edgeConstraints = [
             tabCollection.leadingAnchor.constraint(equalTo: leadingAnchor),
             tabCollection.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ]
+        safeAreaConstraints = [
+            tabCollection.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            tabCollection.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(edgeConstraints + [
             tabCollection.topAnchor.constraint(equalTo: topAnchor),
             tabCollectionHeightConstraint,
             heightConstraint,

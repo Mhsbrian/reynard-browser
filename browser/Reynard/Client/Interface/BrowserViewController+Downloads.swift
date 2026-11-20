@@ -10,7 +10,7 @@ import UIKit
 extension BrowserViewController: DownloadsCoordinatorDelegate {
     var downloadsShouldRefreshLayoutForStoreChange: Bool {
         return !sidebarCoordinator.hostsSidebar
-        && browserLayout.interfaceIdiom == .pad
+        && browserLayout.family == .regular
         && browserLayout.chromeMode == .pad
     }
     

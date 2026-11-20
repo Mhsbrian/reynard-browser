@@ -54,7 +54,7 @@ extension BrowserViewController {
         initialSection: LibrarySection = .bookmarks,
         startsEditingBookmarks: Bool = false
     ) {
-        if browserLayout.interfaceIdiom == .pad,
+        if browserLayout.family == .regular,
            browserLayout.chromeMode == .pad {
             sidebarCoordinator.showSection(
                 initialSection,
@@ -75,7 +75,7 @@ extension BrowserViewController {
     }
     
     func toggleLibrary(section: LibrarySection) {
-        if browserLayout.interfaceIdiom == .pad,
+        if browserLayout.family == .regular,
            browserLayout.chromeMode == .pad {
             (splitViewController as? SidebarViewController)?.toggleSection(section)
             return

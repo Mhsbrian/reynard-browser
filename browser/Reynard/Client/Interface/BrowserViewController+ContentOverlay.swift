@@ -76,6 +76,11 @@ extension BrowserViewController: ContentOverlayCoordinatorHost, SearchOverlayCoo
     }
     
     var homepageGridWidth: HomepageGridWidth {
+        guard BrowserLayout.usesTabletWindowRules else {
+            // The safe area, because a sidebar beside the page insets the page rather than resizing it.
+            return HomepageGridWidth.fitting(width: view.bounds.inset(by: view.safeAreaInsets).width)
+        }
+        
         if isHalfSplitScreenOrSmaller {
             return .fourColumn
         }
@@ -157,7 +162,7 @@ extension BrowserViewController: ContentOverlayCoordinatorHost, SearchOverlayCoo
     }
     
     func openSettingsFromHomepage() {
-        if browserLayout.interfaceIdiom == .pad,
+        if browserLayout.family == .regular,
            browserLayout.chromeMode == .pad {
             sidebarCoordinator.showSection(.settings)
             return

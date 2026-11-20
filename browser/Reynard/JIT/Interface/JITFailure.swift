@@ -259,7 +259,8 @@ final class JITFailureViewController: UIViewController {
     
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        let isPhoneLandscape = traitCollection.userInterfaceIdiom == .phone && view.bounds.width > view.bounds.height
+        // A short window: an iPhone on its side.
+        let isPhoneLandscape = traitCollection.verticalSizeClass == .compact
         contentView.updateForOrientation(isPhoneLandscape: isPhoneLandscape)
     }
     

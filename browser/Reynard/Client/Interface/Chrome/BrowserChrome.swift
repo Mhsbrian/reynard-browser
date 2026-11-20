@@ -50,7 +50,7 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         let presentation: PresentationState
         let search: SearchState
         let topInset: CGFloat
-        let interfaceIdiom: UIUserInterfaceIdiom
+        let family: BrowserLayout.Family
         let orientation: BrowserLayout.ViewportOrientation
         let isTwoThirdSplitScreenOrSmaller: Bool
         let sidebarButtonVisible: Bool
@@ -239,7 +239,7 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         topToolbar.apply(
             state: topState,
             topInset: state.topInset,
-            interfaceIdiom: state.interfaceIdiom,
+            family: state.family,
             sidebarButtonVisible: state.sidebarButtonVisible
         )
         bottomToolbar.apply(
@@ -454,14 +454,14 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     }
     
     private func overlayLayoutMode(for state: State) -> ChromeOverlayContentView.LayoutMode {
-        switch (state.interfaceIdiom, state.orientation) {
-        case (.pad, .portrait):
+        switch (state.family, state.orientation) {
+        case (.regular, .portrait):
             return .padPortrait
-        case (.pad, .landscape) where state.isTwoThirdSplitScreenOrSmaller:
+        case (.regular, .landscape) where state.isTwoThirdSplitScreenOrSmaller:
             return .padConstrained
-        case (.pad, .landscape):
+        case (.regular, .landscape):
             return .padLandscape
-        default:
+        case (.compact, _):
             return .phoneLandscape
         }
     }
@@ -570,6 +570,9 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     }
     
     var isAddressBarEditing: Bool { return addressBar.isEditingText }
+    var addressBarEditing: AddressBar.Editing? { return addressBar.editing }
+    
+    func resumeAddressBarEditing(_ editing: AddressBar.Editing) { addressBar.resumeEditing(editing) }
     var isShowingAddressBarAutocomplete: Bool { return addressBar.isShowingAutocomplete }
     
     // MARK: - Toolbar Updates
