@@ -22,7 +22,7 @@ enum SearchContentMode: Equatable {
         layout: BrowserLayout,
         widthMode: SearchWidthMode = .standard
     ) -> SearchContentMode {
-        if layout.interfaceIdiom == .pad,
+        if layout.family == .regular,
            widthMode == .halfSplitScreenOrSmaller {
             return .embedded
         }

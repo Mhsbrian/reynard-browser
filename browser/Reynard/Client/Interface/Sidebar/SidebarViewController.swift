@@ -18,6 +18,7 @@ final class SidebarViewController: UISplitViewController, UISplitViewControllerD
     
     private let contentController: SidebarContentController
     private var sidebarVisible = false
+    private var contentHorizontalSizeClass: UIUserInterfaceSizeClass?
     private weak var activeSidebarTextField: UITextField?
     
     var contentBrowser: SidebarContentController {
@@ -89,6 +90,21 @@ final class SidebarViewController: UISplitViewController, UISplitViewControllerD
         super.viewWillLayoutSubviews()
         updateContentLayoutIfNeeded(animated: false, duration: UX.layoutAnimationDuration)
         updateSplitBehavior()
+    }
+    
+    // MARK: - Size Class
+    
+    /// Gives the browser the window's width class, which this split view's own override would otherwise hide from it.
+    func setContentHorizontalSizeClass(_ sizeClass: UIUserInterfaceSizeClass) {
+        guard contentHorizontalSizeClass != sizeClass else {
+            return
+        }
+        
+        contentHorizontalSizeClass = sizeClass
+        setOverrideTraitCollection(
+            UITraitCollection(horizontalSizeClass: sizeClass),
+            forChild: browserNavigationController
+        )
     }
     
     // MARK: - Visibility

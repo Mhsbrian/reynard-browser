@@ -538,8 +538,8 @@ private final class PullToRefreshGestureRecognizer: UIGestureRecognizer {
         return touchPosition.y - touchOrigin.y
     }
     var progress: CGFloat {
-        let isLandscapePhone = view?.traitCollection.userInterfaceIdiom == .phone &&
-        (view?.bounds.width ?? 0) > (view?.bounds.height ?? 0)
+        // A short window: an iPhone on its side.
+        let isLandscapePhone = view?.traitCollection.verticalSizeClass == .compact
         let refreshThreshold = isLandscapePhone
         ? WebContentView.UX.landscapePhoneRefreshThreshold
         : WebContentView.UX.refreshThreshold

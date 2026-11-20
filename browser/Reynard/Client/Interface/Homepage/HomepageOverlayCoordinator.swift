@@ -303,7 +303,7 @@ final class HomepageOverlayCoordinator {
         layout: BrowserLayout,
         gridWidth: HomepageGridWidth
     ) -> HomepagePresentation? {
-        if layout.interfaceIdiom == .pad,
+        if layout.family == .regular,
            gridWidth == .fourColumn {
             return HomepagePresentation(
                 host: .embedded,
@@ -312,14 +312,14 @@ final class HomepageOverlayCoordinator {
             )
         }
         
-        switch (layout.interfaceIdiom, layout.chromeMode, layout.orientation) {
-        case (.phone, _, .portrait), (.pad, .compact, _):
+        switch (layout.family, layout.chromeMode, layout.orientation) {
+        case (.compact, _, .portrait), (.regular, .compact, _):
             return HomepagePresentation(
                 host: .embedded,
                 contentMode: embeddedContentMode(layout: layout),
                 showsBackground: false
             )
-        case (.phone, _, .landscape), (.pad, .pad, _):
+        case (.compact, _, .landscape), (.regular, .pad, _):
             return HomepagePresentation(
                 host: .detached,
                 contentMode: HomepageContentMode.detached(layout: layout),

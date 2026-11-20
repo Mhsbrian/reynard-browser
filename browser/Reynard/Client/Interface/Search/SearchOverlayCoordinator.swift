@@ -35,6 +35,7 @@ final class SearchOverlayCoordinator {
     private let searchViewController: SearchViewController
     private var query = ""
     private var restoresSuggestionsOnFocus = false
+    private var animatesDismissalOnEndEditing = true
     private var searchTransitionID = 0
     
     private(set) var isFocused = false
@@ -85,7 +86,7 @@ final class SearchOverlayCoordinator {
     
     var chromeState: BrowserChrome.SearchState {
         guard isFocused else { return .inactive }
-        if let scrollDismissalState = overlayCoordinator.chromeStateForAddressBarScrollDismissal(for: .search, layout: delegate?.searchLayout ?? .initial(interfaceIdiom: .phone)) {
+        if let scrollDismissalState = overlayCoordinator.chromeStateForAddressBarScrollDismissal(for: .search, layout: delegate?.searchLayout ?? .initial(family: .compact)) {
             return scrollDismissalState
         }
         return .focused
@@ -162,7 +163,7 @@ final class SearchOverlayCoordinator {
         }
         
         delegate?.refreshSearchAddressBar()
-        dismissSearch(animated: true) { [weak self] in
+        dismissSearch(animated: animatesDismissalOnEndEditing) { [weak self] in
             self?.clearSuggestions()
         }
         if delegate?.isSearchAddressBarEditing != true {
@@ -296,6 +297,16 @@ final class SearchOverlayCoordinator {
         if searchContentMode?.overlayHost == .detached {
             dismissSearch(animated: false)
         }
+    }
+    
+    /// Runs `action` with the search overlay leaving at once when the address bar stops being edited.
+    ///
+    /// For editing that is about to be taken up again in a new layout: an overlay still animating out would
+    /// finish after the new one is in place and take its suggestions away.
+    func withoutDismissalAnimation(_ action: () -> Void) {
+        animatesDismissalOnEndEditing = false
+        action()
+        animatesDismissalOnEndEditing = true
     }
     
     func resetPresentationSession() {

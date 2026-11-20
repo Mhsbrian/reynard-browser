@@ -152,7 +152,7 @@ final class TopToolbar: UIView {
     private var widthLimitedStandardAddressBarConstraints: [NSLayoutConstraint] = []
     
     private var layoutState: LayoutState = .hidden
-    private var layoutInterfaceIdiom: UIUserInterfaceIdiom = .unspecified
+    private var layoutFamily: BrowserLayout.Family = .compact
     private var layoutSidebarButtonVisible = false
     private var isUsingStandardAddressBarWidthLimit = false
     
@@ -233,11 +233,11 @@ final class TopToolbar: UIView {
     func apply(
         state: LayoutState,
         topInset: CGFloat,
-        interfaceIdiom: UIUserInterfaceIdiom,
+        family: BrowserLayout.Family,
         sidebarButtonVisible: Bool
     ) {
         layoutState = state
-        layoutInterfaceIdiom = interfaceIdiom
+        layoutFamily = family
         layoutSidebarButtonVisible = sidebarButtonVisible
         
         UIView.performWithoutAnimation {
@@ -250,14 +250,14 @@ final class TopToolbar: UIView {
             leadingButtons.isHidden = isCompact
             trailingButtons.isHidden = isCompact
             leadingWidthConstraint.constant = isCompact ? 0 : leadingWidth(
-                interfaceIdiom: interfaceIdiom,
+                family: family,
                 sidebarButtonVisible: sidebarButtonVisible,
                 showsDownloads: downloadButton.isShowingDownloads
             )
             trailingWidthConstraint.constant = isCompact ? 0 : UX.topToolbarStandardButtonStackWidth
             
-            sidebarButton.isHidden = interfaceIdiom != .pad || !sidebarButtonVisible
-            libraryButton.isHidden = interfaceIdiom == .pad
+            sidebarButton.isHidden = family != .regular || !sidebarButtonVisible
+            libraryButton.isHidden = family == .regular
             downloadButton.isHidden = isCompact || !downloadButton.isShowingDownloads
             
             NSLayoutConstraint.deactivate(standardAddressBarConstraints + widthLimitedStandardAddressBarConstraints + compactAddressBarConstraints)
@@ -422,11 +422,11 @@ final class TopToolbar: UIView {
     }
     
     private func leadingWidth(
-        interfaceIdiom: UIUserInterfaceIdiom,
+        family: BrowserLayout.Family,
         sidebarButtonVisible: Bool,
         showsDownloads: Bool
     ) -> CGFloat {
-        guard interfaceIdiom == .pad else { return UX.topToolbarStandardButtonStackWidth }
+        guard family == .regular else { return UX.topToolbarStandardButtonStackWidth }
         let visibleButtonCount = (sidebarButtonVisible ? 3 : 2) + (showsDownloads ? 1 : 0)
         return (CGFloat(visibleButtonCount) * UX.topToolbarButtonStackHeight)
         + (CGFloat(max(visibleButtonCount - 1, 0)) * UX.topToolbarButtonSpacing)
@@ -483,7 +483,7 @@ final class TopToolbar: UIView {
         let isCompact = layoutState == .compact
         downloadButton.isHidden = layoutState != .standard || !downloadButton.isShowingDownloads
         leadingWidthConstraint.constant = isCompact ? 0 : leadingWidth(
-            interfaceIdiom: layoutInterfaceIdiom,
+            family: layoutFamily,
             sidebarButtonVisible: layoutSidebarButtonVisible,
             showsDownloads: downloadButton.isShowingDownloads
         )

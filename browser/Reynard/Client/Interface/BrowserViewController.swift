@@ -24,8 +24,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     
     // MARK: - State
     
-    let sessionManager = SessionManager()
-    lazy var tabManager = TabManagerImplementation(
+    let sessionManager: SessionManager
+    lazy var tabManager: TabManagerImplementation = adoptedSidebarContent?.tabManager ?? TabManagerImplementation(
         delegate: self,
         sessionManager: sessionManager
     )
@@ -37,11 +37,18 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     )?
     private var preFullscreenOrientation: UIInterfaceOrientation?
     weak var fullscreenSession: GeckoSession?
-    private let allowsSidebarHosting: Bool
+    private(set) var sidebarRole: SidebarRole
+    private let adoptedSidebarContent: BrowserViewController?
+    var sidebarContentToAdopt: BrowserViewController? { return adoptedSidebarContent }
+    private var needsSidebarHost = false
+    private var isSidebarHostAdoptionScheduled = false
+    private var hingeInteraction: UIInteraction?
     private var shouldRestoreContentFocus = false
     private(set) var browserLayout = BrowserLayout.initial(
-        interfaceIdiom: UIDevice.current.userInterfaceIdiom
+        family: BrowserLayout.usesTabletWindowRules ? .regular : .compact
     )
+    private var resolvedLayoutEnvironment: BrowserLayout.Environment?
+    private var appliedHomepageGridWidth: HomepageGridWidth?
     
     // MARK: - Views And Coordinators
     
@@ -72,7 +79,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     lazy var downloadsCoordinator = DownloadsCoordinator(delegate: self)
     lazy var sidebarCoordinator = SidebarCoordinator(
         host: self,
-        canHostSidebar: allowsSidebarHosting
+        canHostSidebar: sidebarRole == .host
     )
     lazy var addonCoordinator = AddonCoordinator(
         dataSource: self,
@@ -125,7 +132,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             return lockedOrientations
         }
         
-        return browserLayout.interfaceIdiom == .pad ? .all : .allButUpsideDown
+        // Which way up a device may be held is about the device, not about the window.
+        return BrowserLayout.usesTabletWindowRules ? .all : .allButUpsideDown
     }
     
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
@@ -134,7 +142,24 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     }
     
     init(canHostSidebar: Bool = true) {
-        self.allowsSidebarHosting = canHostSidebar
+        if !canHostSidebar {
+            sidebarRole = .content
+        } else {
+            sidebarRole = BrowserLayout.usesTabletWindowRules ? .host : .standalone
+        }
+        adoptedSidebarContent = nil
+        sessionManager = SessionManager()
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    /// The container for a browser that is already running: see `adoptSidebarHostIfPossible()`.
+    ///
+    /// It shares the browser's session and tab managers, so that what the scene tells its root view controller
+    /// goes on reaching the browser.
+    private init(adopting content: BrowserViewController) {
+        sidebarRole = .host
+        adoptedSidebarContent = content
+        sessionManager = content.sessionManager
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -150,6 +175,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        observeLayoutTraits()
         
         if sidebarCoordinator.installHostIfNeeded() {
             return
@@ -166,6 +192,8 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         syncBrowserNavigationChrome(animated: false)
         browserChrome.syncSidebarButton(splitViewController: splitViewController)
         applyUpdateMenuButtonBadge()
+        
+        observeHinge()
         
         tabManager.createInitialTab()
         refreshAddressBar()
@@ -216,6 +244,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             }
             
             requestHomepageAddressBarFocus()
+            scheduleSidebarHostAdoption()
         }
     }
     
@@ -230,10 +259,57 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         )
         homepageOverlayCoordinator.updateVisibleContentInsets()
         invalidateNavigationThumbnailsIfNeeded()
+        updateHomepageGridWidthIfNeeded()
+        scheduleSidebarHostAdoption()
+    }
+    
+    /// The sidebar changes the width of the page area without changing the layout, and the homepage's grid
+    /// follows that width wherever the layout comes from size classes.
+    private func updateHomepageGridWidthIfNeeded() {
+        guard !BrowserLayout.usesTabletWindowRules,
+              browserLayout.family == .regular else {
+            appliedHomepageGridWidth = nil
+            return
+        }
+        
+        let gridWidth = homepageGridWidth
+        guard appliedHomepageGridWidth != gridWidth else {
+            return
+        }
+        
+        let isFirstPass = appliedHomepageGridWidth == nil
+        appliedHomepageGridWidth = gridWidth
+        if !isFirstPass {
+            homepageOverlayCoordinator.updatePresentation(animated: false)
+        }
     }
     
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
+        if #available(iOS 17.0, *),
+           let previousTraitCollection,
+           previousTraitCollection.horizontalSizeClass != traitCollection.horizontalSizeClass
+            || previousTraitCollection.verticalSizeClass != traitCollection.verticalSizeClass {
+            // The size classes have their own registration on these systems: see `observeLayoutTraits()`.
+            return
+        }
+        layoutTraitsDidChange()
+    }
+    
+    /// Follows the size classes the layout is chosen from. Before iOS 17 `traitCollectionDidChange(_:)` does it.
+    private func observeLayoutTraits() {
+        guard #available(iOS 17.0, *) else {
+            return
+        }
+        
+        registerForTraitChanges(
+            [UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]
+        ) { (viewController: BrowserViewController, _: UITraitCollection) in
+            viewController.layoutTraitsDidChange()
+        }
+    }
+    
+    private func layoutTraitsDidChange() {
         DispatchQueue.main.async { [weak self] in
             guard let self,
                   self.isViewLoaded,
@@ -524,12 +600,27 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         }
         
         let previousLayout = browserLayout
-        browserLayout = resolveBrowserLayout()
+        let previousEnvironment = resolvedLayoutEnvironment
+        let environment = currentLayoutEnvironment()
+        resolvedLayoutEnvironment = environment
+        browserLayout = resolveBrowserLayout(in: environment)
+        
+        // A new layout moves the address bar, which ends its editing. When the layout is new because the
+        // window moved to the other display of an iPhone Duo, what was being typed goes with it.
+        var addressBarEditing: AddressBar.Editing?
         if browserLayout != previousLayout {
+            if let previousEnvironment,
+               environment.isDisplayChange(from: previousEnvironment) {
+                addressBarEditing = browserChrome.addressBarEditing
+            }
             if let readerSettings = presentedViewController as? ReaderSettingsViewController {
                 readerSettings.dismiss(animated: false)
             }
-            dismissAddressBarEditingAndOverlays()
+            if addressBarEditing == nil {
+                dismissAddressBarEditingAndOverlays()
+            } else {
+                searchOverlayCoordinator.withoutDismissalAnimation(dismissAddressBarEditingAndOverlays)
+            }
         }
         applyBrowserLayout(animated: animated)
         homepageOverlayCoordinator.updatePresentation(animated: false)
@@ -543,6 +634,14 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         animated
         ? UIView.animate(withDuration: duration, animations: layoutBlock)
         : layoutBlock()
+        
+        if let addressBarEditing {
+            browserChrome.resumeAddressBarEditing(addressBarEditing)
+        }
+        
+        if environment.isRegular {
+            requestSidebarHost()
+        }
     }
     
     func dismissAddressBarEditingAndOverlays() {
@@ -567,7 +666,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         animated: Bool,
         duration: TimeInterval = UX.layoutAnimationDuration
     ) {
-        guard browserLayout != resolveBrowserLayout() else {
+        guard browserLayout != resolveBrowserLayout(in: currentLayoutEnvironment()) else {
             return
         }
         
@@ -630,6 +729,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             topAnchor: browserChrome.tabBarBottomAnchor,
             bottomAnchor: view.bottomAnchor
         )
+        tabBar.keepsTabsInsideSafeArea = browserLayout.family == .regular
         tabBar.setVisibility(targetTabBarVisibility, animated: animated)
     }
     
@@ -645,7 +745,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             return .hidden
         }
         
-        let showsTabBar = browserLayout.interfaceIdiom == .pad
+        let showsTabBar = browserLayout.family == .regular
         ? visibleTabCount > 1
         : visibleTabCount > 1 && Prefs.AppearanceSettings.showsLandscapeTabBar
         guard showsTabBar else {
@@ -673,7 +773,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             : (tabOverview.isPresented ? .tabOverview : .browsing),
             search: searchState,
             topInset: browserTopInset(),
-            interfaceIdiom: browserLayout.interfaceIdiom,
+            family: browserLayout.family,
             orientation: browserLayout.orientation,
             isTwoThirdSplitScreenOrSmaller: isSidebarOverlayLayout,
             sidebarButtonVisible: sidebarCoordinator.showChromeSidebarButton,
@@ -681,26 +781,48 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         ))
     }
     
-    private func resolveBrowserLayout() -> BrowserLayout {
-        let interfaceIdiom = traitCollection.userInterfaceIdiom
-        let orientation = currentViewportOrientation()
-        
-        if interfaceIdiom == .pad {
-            return isCompactPadLayout
-            ? resolveCompactLayout(interfaceIdiom: .pad, orientation: orientation)
-            : resolvePadLayout(interfaceIdiom: .pad, orientation: orientation)
-        }
-        
-        guard orientation == .portrait else {
-            return resolvePadLayout(interfaceIdiom: .phone, orientation: .landscape)
-        }
-        
-        return Prefs.AppearanceSettings.addressBarPosition == .top
-        ? resolveCompactLayout(interfaceIdiom: .phone, orientation: .portrait)
-        : resolvePhoneLayout()
+    private func resolveBrowserLayout(in environment: BrowserLayout.Environment) -> BrowserLayout {
+        return BrowserLayout.resolve(
+            in: environment,
+            addressBarPosition: Prefs.AppearanceSettings.addressBarPosition
+        )
     }
     
-    private func currentViewportOrientation() -> BrowserLayout.ViewportOrientation {
+    /// What the layout is chosen from: the window's size classes and bounds.
+    ///
+    /// The size classes are read from the window because the sidebar's split view overrides them for its children.
+    private func currentLayoutEnvironment() -> BrowserLayout.Environment {
+        let traits = view.window?.traitCollection ?? traitCollection
+        return BrowserLayout.Environment(
+            horizontalSizeClass: traits.horizontalSizeClass,
+            verticalSizeClass: traits.verticalSizeClass,
+            windowSize: browserWindowSize(),
+            hasSidebar: splitViewController is SidebarViewController,
+            tabletWindow: BrowserLayout.usesTabletWindowRules ? currentTabletWindow() : nil
+        )
+    }
+    
+    private func browserWindowSize() -> CGSize {
+        if let rootView = view.window?.rootViewController?.view,
+           rootView.bounds.width > 0 {
+            return rootView.bounds.size
+        }
+        
+        return view.window?.bounds.size ?? view.bounds.size
+    }
+    
+    // MARK: - iPad Window Rules
+    
+    private func currentTabletWindow() -> BrowserLayout.TabletWindow {
+        return BrowserLayout.TabletWindow(
+            orientation: currentDisplayOrientation(),
+            isOneThirdSplitScreenOrSmaller: isOneThirdOfDisplayOrSmaller,
+            isHalfSplitScreenOrSmaller: isHalfOfDisplayOrSmaller,
+            isTwoThirdSplitScreenOrSmaller: isTwoThirdsOfDisplayOrSmaller
+        )
+    }
+    
+    private func currentDisplayOrientation() -> BrowserLayout.ViewportOrientation {
         if let interfaceOrientation = view.window?.windowScene?.interfaceOrientation,
            interfaceOrientation != .unknown {
             return interfaceOrientation.isLandscape ? .landscape : .portrait
@@ -709,17 +831,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         return view.bounds.width > view.bounds.height ? .landscape : .portrait
     }
     
-    private func invalidateNavigationThumbnailsIfNeeded() {
-        let didResizeWebContent = contentView.updateWebContentSize()
-        guard didResizeWebContent else {
-            return
-        }
-        
-        tabManager.invalidateNavigationThumbnails()
-        updateNavigationButtons()
-    }
-    
-    var isCompactPadLayout: Bool {
+    private var isOneThirdOfDisplayOrSmaller: Bool {
         guard let window = view.window else {
             return UIApplication.shared.isOneThirdSplitScreenOrSmaller
         }
@@ -730,7 +842,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         )
     }
     
-    var isSidebarOverlayLayout: Bool {
+    private var isTwoThirdsOfDisplayOrSmaller: Bool {
         guard let window = view.window else {
             return UIApplication.shared.isTwoThirdSplitScreenOrSmaller
         }
@@ -741,7 +853,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         )
     }
     
-    var isHalfSplitScreenOrSmaller: Bool {
+    private var isHalfOfDisplayOrSmaller: Bool {
         guard let window = view.window else {
             return UIApplication.shared.isHalfSplitScreenOrSmaller
         }
@@ -761,43 +873,33 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         return rootView.bounds.width
     }
     
-    private func resolvePhoneLayout() -> BrowserLayout {
-        return BrowserLayout(
-            interfaceIdiom: .phone,
-            orientation: .portrait,
-            chromeMode: .phone,
-            chromePosition: .bottom,
-            tabOverviewToolbarPosition: .bottom,
-            overlayHost: .embedded
-        )
+    // MARK: - Window Width
+    
+    /// Too narrow for the regular interface, so the sidebar's split view collapses.
+    var isCompactPadLayout: Bool {
+        guard BrowserLayout.usesTabletWindowRules else {
+            return !currentLayoutEnvironment().isRegular
+        }
+        
+        return isOneThirdOfDisplayOrSmaller
     }
     
-    private func resolveCompactLayout(
-        interfaceIdiom: UIUserInterfaceIdiom,
-        orientation: BrowserLayout.ViewportOrientation
-    ) -> BrowserLayout {
-        return BrowserLayout(
-            interfaceIdiom: interfaceIdiom,
-            orientation: orientation,
-            chromeMode: .compact,
-            chromePosition: interfaceIdiom == .phone ? .top : .bottom,
-            tabOverviewToolbarPosition: .bottom,
-            overlayHost: .embedded
-        )
+    var isSidebarOverlayLayout: Bool {
+        return currentLayoutEnvironment().isTwoThirdSplitScreenOrSmaller
     }
     
-    private func resolvePadLayout(
-        interfaceIdiom: UIUserInterfaceIdiom,
-        orientation: BrowserLayout.ViewportOrientation
-    ) -> BrowserLayout {
-        return BrowserLayout(
-            interfaceIdiom: interfaceIdiom,
-            orientation: orientation,
-            chromeMode: .pad,
-            chromePosition: .bottom,
-            tabOverviewToolbarPosition: isHalfSplitScreenOrSmaller ? .bottom : .top,
-            overlayHost: .detached
-        )
+    var isHalfSplitScreenOrSmaller: Bool {
+        return currentLayoutEnvironment().isHalfSplitScreenOrSmaller
+    }
+    
+    private func invalidateNavigationThumbnailsIfNeeded() {
+        let didResizeWebContent = contentView.updateWebContentSize()
+        guard didResizeWebContent else {
+            return
+        }
+        
+        tabManager.invalidateNavigationThumbnails()
+        updateNavigationButtons()
     }
     
     private func browserTopInset() -> CGFloat {
@@ -812,6 +914,95 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         }
         
         action()
+    }
+    
+    /// Watches for a hinge, which tells an iPhone Duo from other iPhones before it is opened.
+    private func observeHinge() {
+        guard sidebarRole == .standalone,
+              #available(iOS 27.1, *) else {
+            return
+        }
+        
+        let interaction = UIHingeInteraction { [weak self] _, update in
+            guard update.hinge != nil else {
+                return
+            }
+            self?.requestSidebarHost()
+        }
+        view.addInteraction(interaction)
+        hingeInteraction = interaction
+    }
+    
+    private func requestSidebarHost() {
+        guard sidebarRole == .standalone else {
+            return
+        }
+        
+        needsSidebarHost = true
+        scheduleSidebarHostAdoption()
+    }
+    
+    /// Tries the move on the next turn of the run loop, never in the middle of a layout pass. Called again
+    /// whenever what held it back, such as an open sheet, may have gone.
+    private func scheduleSidebarHostAdoption() {
+        guard sidebarRole == .standalone,
+              needsSidebarHost,
+              !isSidebarHostAdoptionScheduled else {
+            return
+        }
+        
+        isSidebarHostAdoptionScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.isSidebarHostAdoptionScheduled = false
+            self?.adoptSidebarHostIfPossible()
+        }
+    }
+    
+    /// Moves this browser into a sidebar container once the system shows it can reach a window with room for one.
+    ///
+    /// iPad builds the container at launch. An iPhone Duo starts on its cover display reporting what every
+    /// iPhone reports, so there the container waits for a hinge, or for a window that is regular in both
+    /// dimensions. The browser is not rebuilt: its views, tabs and sessions go into the container as they are,
+    /// and from then on opening and closing the phone only resizes them.
+    private func adoptSidebarHostIfPossible() {
+        guard sidebarRole == .standalone,
+              needsSidebarHost,
+              isViewLoaded,
+              let window = view.window,
+              window.rootViewController === self,
+              presentedViewController == nil,
+              !isShowingFullscreenMedia,
+              lockedOrientations == nil,
+              pendingOrientationRequest == nil else {
+            return
+        }
+        
+        let addressBarEditing = browserChrome.addressBarEditing
+        let restoresContentFocus = tabManager.selectedTab?.session.engineView?.isFirstResponder == true
+        let isActive = window.windowScene?.activationState == .foregroundActive
+        
+        if let hingeInteraction {
+            view.removeInteraction(hingeInteraction)
+            self.hingeInteraction = nil
+        }
+        stopScreenOrientationHandling()
+        sidebarRole = .content
+        
+        let host = BrowserViewController(adopting: self)
+        window.rootViewController = host
+        host.view.layoutIfNeeded()
+        if isActive {
+            host.startScreenOrientationHandling()
+        }
+        
+        toolbarController.unlock(for: .viewPresentation)
+        shouldRestoreContentFocus = false
+        updateBrowserLayout(animated: false)
+        if let addressBarEditing {
+            browserChrome.resumeAddressBarEditing(addressBarEditing)
+        } else if restoresContentFocus {
+            requestContentKeyboardFocus()
+        }
     }
     
     // MARK: - Notifications
@@ -998,7 +1189,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         let spansWindow = view.bounds.width > 0
         && keyboardFrame.width >= view.bounds.width * UX.floatingKeyboardWidthRatio
         let sitsFlushWithBottom = keyboardFrame.maxY >= view.bounds.maxY - 8
-        let isFloatingKeyboard = browserLayout.interfaceIdiom == .pad
+        let isFloatingKeyboard = browserLayout.family == .regular
         && !(spansWindow && sitsFlushWithBottom)
         let shouldAdjustForKeyboard = keyboardInset > 0
         && !isFloatingKeyboard
@@ -1018,7 +1209,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         }
         
         let animation = keyboardAnimation(from: notification)
-        if shouldRelocateInput && browserLayout.interfaceIdiom == .phone {
+        if shouldRelocateInput && browserLayout.family == .compact {
             browserChrome.showActionBar(.keyboardDismissal, animated: false)
         } else if browserChrome.isShowingKeyboardDismissal {
             browserChrome.dismissActionBar(animated: false)
@@ -1211,7 +1402,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     }
     
     private func updateFullscreenOrientation(_ fullScreen: Bool) {
-        guard browserLayout.interfaceIdiom == .phone else {
+        guard browserLayout.family == .compact else {
             return
         }
         
@@ -1274,7 +1465,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     }
     
     func startScreenOrientationHandling() {
-        guard allowsSidebarHosting else {
+        guard sidebarRole != .content else {
             return
         }
         

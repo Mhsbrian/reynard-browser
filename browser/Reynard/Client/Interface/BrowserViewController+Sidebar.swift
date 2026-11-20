@@ -44,8 +44,8 @@ extension BrowserViewController: SidebarContentController, SidebarCoordinatorHos
         return self
     }
     
-    var sidebarInterfaceIdiom: UIUserInterfaceIdiom {
-        return browserLayout.interfaceIdiom
+    var sidebarLayoutFamily: BrowserLayout.Family {
+        return browserLayout.family
     }
     
     var sidebarChromeMode: BrowserChromeMode {
@@ -61,7 +61,7 @@ extension BrowserViewController: SidebarContentController, SidebarCoordinatorHos
     }
     
     func makeSidebarContentController() -> SidebarContentController {
-        return BrowserViewController(canHostSidebar: false)
+        return sidebarContentToAdopt ?? BrowserViewController(canHostSidebar: false)
     }
     
     func sidebarCoordinatorDidChangeVisibility(_ coordinator: SidebarCoordinator, animated: Bool) {

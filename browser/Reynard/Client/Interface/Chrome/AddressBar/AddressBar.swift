@@ -626,6 +626,45 @@ final class AddressBar: UIView {
         return textField.isFirstResponder
     }
     
+    // MARK: - Editing Across Layouts
+    
+    /// How far the person has got with the address field.
+    enum Editing: Equatable {
+        /// The field has the keyboard and nothing has been typed.
+        case focused
+        /// The field holds what the person typed.
+        case typing(String)
+    }
+    
+    /// The editing in progress, or nil when the field does not have the keyboard.
+    var editing: Editing? {
+        guard textField.isFirstResponder else {
+            return nil
+        }
+        if case .focusPreview = autocompleteState {
+            return .focused
+        }
+        return .typing(textField.text ?? "")
+    }
+    
+    /// Takes editing up again after a new layout moved the bar and ended it.
+    func resumeEditing(_ editing: Editing) {
+        guard textField.becomeFirstResponder(),
+              case let .typing(text) = editing else {
+            return
+        }
+        
+        if case .focusPreview = autocompleteState {
+            clearFocusPreview()
+        }
+        let previousText = lastEditingText
+        textField.text = text
+        lastEditingText = text
+        restoreCaretToEnd()
+        applyState()
+        searchDelegate?.addressBar(self, didChangeText: text, previousText: previousText, isDelete: false)
+    }
+    
     // MARK: - View Setup
     
     private func configureAppearance() {
