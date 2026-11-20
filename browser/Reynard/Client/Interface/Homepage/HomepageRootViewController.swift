@@ -110,6 +110,22 @@ final class HomepageRootViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateSectionStackWidth()
+        updateEmptyState()
+    }
+    
+    /// The empty state stands in for the sections, so it shows only while none of them does. Each section
+    /// hides itself when it has nothing, which lays the page out again and brings it here.
+    private func updateEmptyState() {
+        guard let emptyStateView = sectionViewControllers[.emptyState]?.view else {
+            return
+        }
+        
+        let hasContent = sectionViewControllers.contains { section, viewController in
+            section != .emptyState && !viewController.view.isHidden
+        }
+        if emptyStateView.isHidden != hasContent {
+            emptyStateView.isHidden = hasContent
+        }
     }
     
     override func viewSafeAreaInsetsDidChange() {
@@ -203,6 +219,7 @@ final class HomepageRootViewController: UIViewController {
         view.addSubview(wallpaperImageView)
         view.addSubview(scrollView)
         scrollView.addSubview(sectionStackView)
+        view.accessibilityIdentifier = AccessibilityIdentifier.Homepage.view
         updateWallpaper()
     }
     
@@ -234,10 +251,23 @@ final class HomepageRootViewController: UIViewController {
             let viewController = makeSectionViewController(for: section)
             addChild(viewController)
             viewController.view.translatesAutoresizingMaskIntoConstraints = false
+            // The page scrolls under the bars and past the corners of the display, and the page's own insets
+            // already keep it clear of both. A section that answered to the safe area as well would change
+            // its margins, and with them its height, as it crossed the edge: the layout then never settles.
+            viewController.viewRespectsSystemMinimumLayoutMargins = false
+            Self.detachFromSafeArea(viewController.view)
             sectionStackView.addArrangedSubview(viewController.view)
             viewController.didMove(toParent: self)
             sectionViewControllers[section] = viewController
         }
+    }
+    
+    private static func detachFromSafeArea(_ view: UIView) {
+        view.insetsLayoutMarginsFromSafeArea = false
+        if let scrollView = view as? UIScrollView {
+            scrollView.contentInsetAdjustmentBehavior = .never
+        }
+        view.subviews.forEach(detachFromSafeArea)
     }
     
     private func reloadSections() {
@@ -254,6 +284,18 @@ final class HomepageRootViewController: UIViewController {
     
     private func makeSectionViewController(for section: HomepageSection) -> UIViewController {
         switch section {
+        case .recommendation(.welcome):
+            let viewController = WelcomeViewController()
+            viewController.delegate = self
+            viewController.setContentMode(contentMode)
+            viewController.setPrivateBrowsing(isPrivateBrowsing)
+            return viewController
+            
+        case .emptyState:
+            let viewController = HomepageEmptyStateViewController()
+            viewController.delegate = self
+            return viewController
+            
         case .recommendation(.performance):
             let viewController = PerformanceRecommendationViewController()
             viewController.delegate = self
@@ -371,6 +413,8 @@ final class HomepageRootViewController: UIViewController {
                 (!isPrivateBrowsing || Prefs.HomepageSettings.showsFrequentlyVisitedInPrivateBrowsing)
             case .recentlyClosedTabs:
                 return Prefs.HomepageSettings.showsRecentlyClosedTabs && !isPrivateBrowsing
+            case .emptyState:
+                return !isPrivateBrowsing
             default:
                 return true
             }
@@ -386,6 +430,13 @@ final class HomepageRootViewController: UIViewController {
             self,
             selector: #selector(homepageSettingsDidChange),
             name: .homepageSettingsDidChange,
+            object: nil
+        )
+        // Sections size their tiles and rows for the text size they were made at.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(homepageSettingsDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
             object: nil
         )
     }

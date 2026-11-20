@@ -15,7 +15,6 @@ final class TabOverviewPresentation {
         static let padCardTargetWidth: CGFloat = 250
         static let minimumTabCardColumnCount = 2
         static let evenColumnMinimumWidthRatio: CGFloat = 0.8
-        static let cardMetadataHeight: CGFloat = 22
         static let hiddenCollectionVerticalOffset: CGFloat = 26
         static let presentedPageScaleReduction: CGFloat = 0.08
         static let hiddenPhoneToolbarTranslation: CGFloat = 24
@@ -85,7 +84,7 @@ final class TabOverviewPresentation {
         let totalSpacing = CGFloat(columns - 1) * UX.cardCollectionItemSpacing
         let itemWidth = foldedColumns(in: collectionView).map { floor($0.itemWidth) }
         ?? floor((availableWidth - totalSpacing) / CGFloat(columns))
-        let itemHeight = floor((itemWidth * tabViewAspectRatio) + UX.cardMetadataHeight)
+        let itemHeight = floor((itemWidth * tabViewAspectRatio) + TabOverviewCard.metadataHeight)
         return CGSize(width: itemWidth, height: itemHeight)
     }
     

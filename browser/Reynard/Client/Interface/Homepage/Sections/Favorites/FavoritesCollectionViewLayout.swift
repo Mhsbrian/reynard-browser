@@ -12,7 +12,6 @@ struct FavoritesLayoutMetrics: Equatable {
         static let maximumIconSize: CGFloat = 74
         static let minimumInteritemSpacing: CGFloat = 15
         static let shadowPadding: CGFloat = 10
-        static let titleHeight: CGFloat = 34
     }
     
     static let shadowPadding: CGFloat = UX.shadowPadding
@@ -47,7 +46,7 @@ struct FavoritesLayoutMetrics: Equatable {
             )
             foldedColumnOrigins = columns.origins
             interitemSpacing = UX.minimumInteritemSpacing
-            itemSize = CGSize(width: columns.itemWidth, height: columns.itemWidth + UX.titleHeight)
+            itemSize = CGSize(width: columns.itemWidth, height: columns.itemWidth + FavoriteSiteCollectionViewCell.titleHeight)
             return
         }
         
@@ -60,7 +59,7 @@ struct FavoritesLayoutMetrics: Equatable {
         interitemSpacing = self.columnCount > 1
         ? max(remainingWidth / CGFloat(self.columnCount - 1), 0)
         : 0
-        itemSize = CGSize(width: itemWidth, height: itemWidth + UX.titleHeight)
+        itemSize = CGSize(width: itemWidth, height: itemWidth + FavoriteSiteCollectionViewCell.titleHeight)
     }
     
     func contentHeight(rowCount: Int) -> CGFloat {

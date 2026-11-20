@@ -9,8 +9,8 @@ import UIKit
 
 final class TabOverviewToolbarButton: UIButton {
     private enum UX {
-        static let toolbarButtonSideLength: CGFloat = 42
-        static let toolbarButtonCornerRadius: CGFloat = 21
+        static let toolbarButtonSideLength: CGFloat = TouchTarget.minimumSideLength
+        static let toolbarButtonCornerRadius: CGFloat = toolbarButtonSideLength / 2
         static let toolbarButtonBorderWidth: CGFloat = 1
         static let toolbarButtonSymbolPointSize: CGFloat = 17
         static let disabledToolbarButtonAlpha: CGFloat = 0.35
@@ -20,6 +20,31 @@ final class TabOverviewToolbarButton: UIButton {
         case clear
         case add
         case done
+        
+        /// The name of the action, for the buttons that show it as a symbol.
+        var title: String {
+            switch self {
+            case .clear: return NSLocalizedString("Close Tabs", comment: "The button in the tab overview that opens the menu for closing tabs")
+            case .add: return NSLocalizedString("New Tab", comment: "")
+            case .done: return NSLocalizedString("Done", comment: "")
+            }
+        }
+        
+        /// Gives a bar button item that shows the action as a symbol its name.
+        func name(_ item: UIBarButtonItem) {
+            item.accessibilityLabel = title
+            item.accessibilityIdentifier = accessibilityIdentifier
+            item.largeContentSizeImage = item.image
+            item.title = item.title ?? title
+        }
+        
+        var accessibilityIdentifier: String {
+            switch self {
+            case .clear: return AccessibilityIdentifier.TabOverview.closeTabs
+            case .add: return AccessibilityIdentifier.TabOverview.newTab
+            case .done: return AccessibilityIdentifier.TabOverview.done
+            }
+        }
     }
     
     private let action: Action
@@ -34,6 +59,9 @@ final class TabOverviewToolbarButton: UIButton {
         configureAppearance()
         configureImage()
         configureConstraints()
+        accessibilityLabel = action.title
+        accessibilityIdentifier = action.accessibilityIdentifier
+        enableLargeContentViewer(title: action.title, image: UIImage(named: symbolName))
     }
     
     required init?(coder: NSCoder) {
@@ -42,7 +70,10 @@ final class TabOverviewToolbarButton: UIButton {
     
     func setActionEnabled(_ enabled: Bool) {
         isEnabled = enabled
-        alpha = enabled ? 1 : UX.disabledToolbarButtonAlpha
+        // The system dims a disabled glass button by itself.
+        if #unavailable(iOS 26.0) {
+            alpha = enabled ? 1 : UX.disabledToolbarButtonAlpha
+        }
     }
     
     func installMenu(_ menu: UIMenu?) {
@@ -62,6 +93,37 @@ final class TabOverviewToolbarButton: UIButton {
     
     private func configureAppearance() {
         translatesAutoresizingMaskIntoConstraints = false
+        if #available(iOS 26.0, *) {
+            // The system's glass buttons, one for each action. They were items in a toolbar 146 points wide,
+            // and a toolbar that narrow now moves its items into an overflow menu; a row of buttons cannot.
+            var configuration = action == .done
+            ? UIButton.Configuration.prominentGlass()
+            : UIButton.Configuration.glass()
+            configuration.image = UIImage(named: symbolName)
+            configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+                pointSize: UX.toolbarButtonSymbolPointSize,
+                weight: action == .done ? .semibold : .regular
+            )
+            configuration.cornerStyle = .capsule
+            configuration.baseBackgroundColor = action == .done ? .label : nil
+            // Done is the label colour with its symbol in the background colour, as it was before glass. The
+            // system gives a button on a light surface a light appearance of its own, in which the
+            // background colour would be the surface's own colour: so the symbol's colour is resolved for the
+            // window the button is in.
+            if action == .done {
+                configuration.imageColorTransformer = UIConfigurationColorTransformer { [weak self] _ in
+                    let traits = self?.window?.traitCollection ?? UITraitCollection.current
+                    return UIColor.systemBackground.resolvedColor(with: traits)
+                }
+            } else {
+                configuration.baseForegroundColor = .label
+            }
+            configuration.contentInsets = .zero
+            self.configuration = configuration
+            tintColor = .label
+            return
+        }
+        
         tintColor = action == .done ? .systemBackground : .label
         backgroundColor = action == .done ? .label : .quaternarySystemFill
         layer.borderWidth = action == .done ? 0 : UX.toolbarButtonBorderWidth
@@ -71,6 +133,10 @@ final class TabOverviewToolbarButton: UIButton {
     }
     
     private func configureImage() {
+        if #available(iOS 26.0, *) {
+            return
+        }
+        
         setImage(UIImage(named: symbolName), for: .normal)
         setPreferredSymbolConfiguration(
             UIImage.SymbolConfiguration(pointSize: UX.toolbarButtonSymbolPointSize, weight: .regular),

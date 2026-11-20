@@ -35,10 +35,10 @@ final class AddressBar: UIView {
         static let addressBarButtonToTextSpacing: CGFloat = 8
         static let addressBarDismissButtonSpacing: CGFloat = 9
         static let addressBarButtonSize: CGFloat = 18
-        static let addressBarHeight: CGFloat = 44
         static let addressBarLoadingProgressHeight: CGFloat = 2
         static let addressBarAutocompleteTrailingInset: CGFloat = 30
-        static let addressBarTextFontSize: CGFloat = 17
+        // Two buttons side by side are this far apart, so that each has a touch target of its own.
+        static let addressBarAdjacentButtonSpacing: CGFloat = TouchTarget.minimumSideLength - addressBarButtonSize
         static let addressBarDismissButtonAnimationDuration: TimeInterval = 0.2
         static let addressBarAudioButtonAnimationDuration: TimeInterval = 0.18
         static let addressBarBackgroundDarkModeShadowAlpha: CGFloat = 0.3
@@ -179,7 +179,7 @@ final class AddressBar: UIView {
         view.layer.cornerCurve = .continuous
         view.layer.cornerRadius = UX.addressBarBackgroundCornerRadius
         view.layer.borderWidth = UX.borderWidth
-        view.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        view.layer.borderColor = AccessibilityAppearance.hairlineColor.cgColor
         return view
     }()
     
@@ -237,6 +237,9 @@ final class AddressBar: UIView {
         field.textContentType = .none
         field.returnKeyType = .go
         field.clearButtonMode = .whileEditing
+        field.font = BarMetrics.font(ofSize: BarMetrics.addressBarTextSize)
+        field.adjustsFontForContentSizeCategory = true
+        field.accessibilityIdentifier = AccessibilityIdentifier.AddressBar.textField
         return field
     }()
     
@@ -245,10 +248,13 @@ final class AddressBar: UIView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .left
         label.textColor = .label
-        label.font = UIFont.systemFont(ofSize: UX.addressBarTextFontSize)
+        label.font = BarMetrics.font(ofSize: BarMetrics.addressBarTextSize)
+        label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byTruncatingTail
         label.numberOfLines = 1
         label.isUserInteractionEnabled = false
+        // Read as the address field it stands for: see `updateAccessibility(for:)`.
+        label.accessibilityIdentifier = AccessibilityIdentifier.AddressBar.bar
         return label
     }()
     
@@ -257,10 +263,12 @@ final class AddressBar: UIView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .left
         label.textColor = .label
-        label.font = UIFont.systemFont(ofSize: UX.addressBarTextFontSize)
+        label.font = BarMetrics.font(ofSize: BarMetrics.addressBarTextSize)
+        label.adjustsFontForContentSizeCategory = true
         label.lineBreakMode = .byTruncatingTail
         label.numberOfLines = 1
         label.isHidden = true
+        label.isAccessibilityElement = false
         return label
     }()
     
@@ -269,6 +277,8 @@ final class AddressBar: UIView {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.backgroundColor = .clear
         button.isHidden = true
+        // It lies over the text field to catch a tap on the suggested completion; VoiceOver edits the field.
+        button.isAccessibilityElement = false
         return button
     }()
     
@@ -289,6 +299,7 @@ final class AddressBar: UIView {
     private var backgroundHeightConstraint: NSLayoutConstraint!
     private var dismissWidthConstraint: NSLayoutConstraint!
     private var dismissHeightConstraint: NSLayoutConstraint!
+    private var buttonSizeConstraints: [NSLayoutConstraint] = []
     
     // MARK: - Lifecycle
     
@@ -299,7 +310,7 @@ final class AddressBar: UIView {
         configureConstraints()
         configureTargets()
         configureObservers()
-        applyState()
+        applyTextSize()
     }
     
     required init?(coder: NSCoder) {
@@ -325,6 +336,12 @@ final class AddressBar: UIView {
     
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            applyTextSize()
+        }
+        if previousTraitCollection?.accessibilityContrast != traitCollection.accessibilityContrast {
+            addressBarBorder.layer.borderColor = AccessibilityAppearance.hairlineColor.resolvedColor(with: traitCollection).cgColor
+        }
         guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else {
             return
         }
@@ -469,9 +486,9 @@ final class AddressBar: UIView {
     func updateLayout(position: BrowserChromePosition, chromeMode: BrowserChromeMode) {
         self.position = position
         self.chromeMode = chromeMode
-        backgroundHeightConstraint.constant = UX.addressBarHeight
-        dismissWidthConstraint.constant = UX.addressBarHeight
-        dismissHeightConstraint.constant = UX.addressBarHeight
+        backgroundHeightConstraint.constant = BarMetrics.addressBarHeight
+        dismissWidthConstraint.constant = BarMetrics.addressBarHeight
+        dismissHeightConstraint.constant = BarMetrics.addressBarHeight
         applyState()
     }
     
@@ -699,11 +716,11 @@ final class AddressBar: UIView {
             equalTo: dismissButton.leadingAnchor,
             constant: -UX.addressBarDismissButtonSpacing
         )
-        backgroundHeightConstraint = addressBarBackground.heightAnchor.constraint(equalToConstant: UX.addressBarHeight)
-        dismissWidthConstraint = dismissButton.widthAnchor.constraint(equalToConstant: UX.addressBarHeight)
-        dismissHeightConstraint = dismissButton.heightAnchor.constraint(equalToConstant: UX.addressBarHeight)
+        backgroundHeightConstraint = addressBarBackground.heightAnchor.constraint(equalToConstant: BarMetrics.addressBarHeight)
+        dismissWidthConstraint = dismissButton.widthAnchor.constraint(equalToConstant: BarMetrics.addressBarHeight)
+        dismissHeightConstraint = dismissButton.heightAnchor.constraint(equalToConstant: BarMetrics.addressBarHeight)
         secondaryTrailingButtonWidthConstraint = secondaryTrailingButton.widthAnchor.constraint(equalToConstant: UX.addressBarButtonSize)
-        secondaryTrailingButtonToButtonConstraint = secondaryTrailingButton.trailingAnchor.constraint(equalTo: trailingButton.leadingAnchor, constant: -UX.addressBarButtonToTextSpacing)
+        secondaryTrailingButtonToButtonConstraint = secondaryTrailingButton.trailingAnchor.constraint(equalTo: trailingButton.leadingAnchor, constant: -UX.addressBarAdjacentButtonSpacing)
         secondaryTrailingButtonToBackgroundConstraint = secondaryTrailingButton.trailingAnchor.constraint(equalTo: addressBarContent.trailingAnchor, constant: -UX.addressBarContentHorizontalInset)
         
         NSLayoutConstraint.activate([
@@ -730,13 +747,9 @@ final class AddressBar: UIView {
             
             leadingButton.leadingAnchor.constraint(equalTo: addressBarContent.leadingAnchor, constant: UX.addressBarContentHorizontalInset),
             leadingButton.centerYAnchor.constraint(equalTo: addressBarContent.centerYAnchor),
-            leadingButton.widthAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
-            leadingButton.heightAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
             
             trailingButton.trailingAnchor.constraint(equalTo: addressBarContent.trailingAnchor, constant: -UX.addressBarContentHorizontalInset),
             trailingButton.centerYAnchor.constraint(equalTo: addressBarContent.centerYAnchor),
-            trailingButton.widthAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
-            trailingButton.heightAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
             
             secondaryTrailingButton.centerYAnchor.constraint(equalTo: addressBarContent.centerYAnchor),
             secondaryTrailingButtonWidthConstraint,
@@ -764,6 +777,14 @@ final class AddressBar: UIView {
             progressView.heightAnchor.constraint(equalToConstant: UX.addressBarLoadingProgressHeight),
         ])
         
+        buttonSizeConstraints = [
+            leadingButton.widthAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
+            leadingButton.heightAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
+            trailingButton.widthAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
+            trailingButton.heightAnchor.constraint(equalToConstant: UX.addressBarButtonSize),
+        ]
+        NSLayoutConstraint.activate(buttonSizeConstraints)
+        
         textLeadingToButtonConstraint = textField.leadingAnchor.constraint(equalTo: leadingButton.trailingAnchor, constant: UX.addressBarButtonToTextSpacing)
         textLeadingToBackgroundConstraint = textField.leadingAnchor.constraint(equalTo: addressBarContent.leadingAnchor, constant: UX.addressBarContentHorizontalInset)
         textTrailingToButtonConstraint = textField.trailingAnchor.constraint(equalTo: trailingButton.leadingAnchor, constant: -UX.addressBarButtonToTextSpacing)
@@ -782,6 +803,7 @@ final class AddressBar: UIView {
         tapGesture.delegate = self
         addGestureRecognizer(tapGesture)
         addressBarContent.addInteraction(UIContextMenuInteraction(delegate: self))
+        configureDragAndDrop()
         textField.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
         leadingButton.addTarget(self, action: #selector(handleReaderButtonTap), for: .touchUpInside)
         trailingButton.addTarget(self, action: #selector(handleTrailingButtonTap), for: .touchUpInside)
@@ -872,6 +894,7 @@ final class AddressBar: UIView {
         applyLeadingButtonState(model.leadingButton)
         applyTrailingButtonState(model.trailingButton)
         applySecondaryTrailingButtonState(model.secondaryTrailingButton)
+        updateAccessibility(for: model)
         
         let showsLeadingButton = model.leadingButton != .hidden
         let showsTrailingButton = model.trailingButton != .hidden
@@ -924,6 +947,85 @@ final class AddressBar: UIView {
             addressLabel.isHidden = false
             textField.isHidden = true
         }
+    }
+    
+    // MARK: - Accessibility And Text Size
+    
+    /// Names what the bar shows. Its buttons are symbols, and while a page is shown its address is a label
+    /// that a tap turns into the text field, so none of them says what it is by itself.
+    private func updateAccessibility(for model: RenderModel) {
+        let addressName = NSLocalizedString("Address", comment: "")
+        textField.accessibilityLabel = addressName
+        
+        if case .page = model.content {
+            addressLabel.isAccessibilityElement = true
+            addressLabel.accessibilityLabel = addressName
+            // The whole address, where the bar shows only the site's name.
+            addressLabel.accessibilityValue = keyCommandHint?.string ?? currentText
+            addressLabel.accessibilityTraits = .button
+            addressLabel.accessibilityHint = AddressBar.placeholderText
+        } else {
+            addressLabel.isAccessibilityElement = false
+        }
+        
+        switch model.leadingButton {
+        case .hidden, .search:
+            // The magnifying glass only decorates the empty field.
+            leadingButton.isAccessibilityElement = false
+        case .menu, .disabled:
+            leadingButton.isAccessibilityElement = true
+            leadingButton.accessibilityLabel = isReaderActive
+            ? NSLocalizedString("Hide Reader", comment: "")
+            : NSLocalizedString("Page Menu", comment: "The button in the address bar that opens the menu of actions for the page")
+            leadingButton.accessibilityIdentifier = AccessibilityIdentifier.AddressBar.pageMenu
+        }
+        
+        switch model.trailingButton {
+        case .hidden:
+            break
+        case .reload:
+            trailingButton.accessibilityLabel = NSLocalizedString("Reload Page", comment: "")
+        case .stop:
+            trailingButton.accessibilityLabel = NSLocalizedString("Stop Loading", comment: "The button in the address bar that stops the page from loading")
+        }
+        trailingButton.accessibilityIdentifier = AccessibilityIdentifier.AddressBar.reload
+        
+        switch model.secondaryTrailingButton {
+        case .hidden:
+            secondaryTrailingButton.isAccessibilityElement = false
+        case .playing, .muted:
+            secondaryTrailingButton.isAccessibilityElement = true
+            secondaryTrailingButton.accessibilityLabel = NSLocalizedString("Tabs with Sound", comment: "")
+            secondaryTrailingButton.accessibilityValue = model.secondaryTrailingButton == .muted
+            ? NSLocalizedString("Muted", comment: "The state of a tab whose sound is turned off")
+            : nil
+        }
+        secondaryTrailingButton.accessibilityIdentifier = AccessibilityIdentifier.AddressBar.audio
+        
+        dismissButton.accessibilityLabel = NSLocalizedString("Cancel", comment: "")
+        dismissButton.accessibilityIdentifier = AccessibilityIdentifier.AddressBar.cancel
+        
+        if #available(iOS 17.0, *) {
+            progressView.accessibilityTraits.insert(.updatesFrequently)
+        }
+    }
+    
+    /// The bar is as high as its text needs, and stays a capsule. Its symbols grow with the text.
+    private func applyTextSize() {
+        let height = BarMetrics.addressBarHeight
+        backgroundHeightConstraint.constant = height
+        dismissWidthConstraint.constant = height
+        dismissHeightConstraint.constant = height
+        for view in [addressBarBackground, addressBarContent, addressBarBorder] {
+            view.layer.cornerRadius = height / 2
+        }
+        
+        let buttonSize = BarMetrics.scaled(UX.addressBarButtonSize)
+        buttonSizeConstraints.forEach { $0.constant = buttonSize }
+        for button in [leadingButton, trailingButton, secondaryTrailingButton] {
+            button.applySymbolScale()
+        }
+        applyState()
     }
     
     @objc private func handleReaderButtonTap() {
@@ -993,9 +1095,9 @@ final class AddressBar: UIView {
             }
         }
         
-        // prevent overlapping touch targets
-        secondaryTrailingButton.horizontalTouchTargetExpansion = UX.addressBarButtonToTextSpacing / 2
-        trailingButton.horizontalTouchTargetExpansion = visible ? UX.addressBarButtonToTextSpacing / 2 : nil
+        // The two buttons' touch targets meet halfway between them and do not overlap.
+        secondaryTrailingButton.horizontalTouchTargetExpansion = UX.addressBarAdjacentButtonSpacing / 2
+        trailingButton.horizontalTouchTargetExpansion = visible ? UX.addressBarAdjacentButtonSpacing / 2 : nil
         
         guard visible else {
             return
@@ -1005,9 +1107,10 @@ final class AddressBar: UIView {
             secondaryTrailingButton.preferredSymbolConfigurationForImage(in: .normal) ?? UIImage.SymbolConfiguration.unspecified
         )
         if let image {
+            let buttonSize = BarMetrics.scaled(UX.addressBarButtonSize)
             secondaryTrailingButtonWidthConstraint.constant = max(
-                UX.addressBarButtonSize,
-                UX.addressBarButtonSize * image.size.width / image.size.height
+                buttonSize,
+                buttonSize * image.size.width / image.size.height
             )
         }
         secondaryTrailingButton.setImage(image, for: .normal)
@@ -1391,6 +1494,64 @@ final class AddressBar: UIView {
 }
 
 // MARK: - UIContextMenuInteractionDelegate
+
+// MARK: - Drag And Drop
+
+extension AddressBar: UIDragInteractionDelegate {
+    /// The page's address can be dragged out of the bar, and a link or text dropped on the bar is opened or
+    /// searched for, as typing it there would.
+    private func configureDragAndDrop() {
+        let dragInteraction = UIDragInteraction(delegate: self)
+        // Off by default on iPhone.
+        dragInteraction.isEnabled = true
+        addressBarContent.addInteraction(dragInteraction)
+        // Text can be dragged out of the field, and dropped into it, while it is being edited.
+        textField.textDragInteraction?.isEnabled = true
+        
+        LinkDropHandler(
+            acceptsText: true,
+            onHighlight: { [weak self] isHighlighted in
+                self?.setDropHighlighted(isHighlighted)
+            },
+            onDrop: { [weak self] content in
+                switch content {
+                case let .links(urls):
+                    self?.searchDelegate?.addressBarDidSubmit(urls[0].absoluteString)
+                case let .text(text):
+                    self?.searchDelegate?.addressBarDidSubmit(text)
+                }
+            }
+        ).install(on: addressBarContent)
+    }
+    
+    private func setDropHighlighted(_ isHighlighted: Bool) {
+        addressBarBorder.layer.borderWidth = isHighlighted ? 2 : UX.borderWidth
+        addressBarBorder.layer.borderColor = isHighlighted
+        ? UIColor.label.resolvedColor(with: traitCollection).cgColor
+        : AccessibilityAppearance.hairlineColor.resolvedColor(with: traitCollection).cgColor
+    }
+    
+    func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
+        // While the field is being edited the text in it is what is dragged, by the field itself.
+        guard editingState == .inactive else {
+            return []
+        }
+        return LinkDragAndDrop.dragItems(for: currentLocationText ?? currentText, title: currentLocationTitle)
+    }
+    
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        previewForLifting item: UIDragItem,
+        session: UIDragSession
+    ) -> UITargetedDragPreview? {
+        let parameters = UIDragPreviewParameters()
+        parameters.visiblePath = UIBezierPath(
+            roundedRect: addressBarContent.bounds,
+            cornerRadius: addressBarContent.bounds.height / 2
+        )
+        return UITargetedDragPreview(view: addressBarContent, parameters: parameters)
+    }
+}
 
 extension AddressBar: UIContextMenuInteractionDelegate {
     func contextMenuInteraction(

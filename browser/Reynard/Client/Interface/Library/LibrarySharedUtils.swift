@@ -16,13 +16,25 @@ enum LibrarySharedUtils {
         static let groupedSectionHeaderFontSize: CGFloat = 15
     }
     
+    private static var groupedSectionHeaderFont: UIFont {
+        return .scaledSystemFont(ofSize: UX.groupedSectionHeaderFontSize, weight: .semibold, relativeTo: .subheadline)
+    }
+    
+    /// The height of a list's section header at the text size in use: 34 points at the default size.
+    static var groupedSectionHeaderHeight: CGFloat {
+        let textHeight = groupedSectionHeaderFont.lineHeight.rounded(.up)
+        return max(34, textHeight + UX.groupedSectionHeaderTopInset + UX.groupedSectionHeaderBottomInset)
+    }
+    
     static func makeGroupedSectionHeader(title: String) -> UIView {
         let container = UIView()
         container.backgroundColor = .systemGroupedBackground
         
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: UX.groupedSectionHeaderFontSize, weight: .semibold)
+        label.font = groupedSectionHeaderFont
+        label.adjustsFontForContentSizeCategory = true
+        label.accessibilityTraits = .header
         label.textColor = .secondaryLabel
         label.text = title
         

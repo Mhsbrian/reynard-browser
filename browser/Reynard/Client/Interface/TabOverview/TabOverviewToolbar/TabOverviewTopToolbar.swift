@@ -10,7 +10,7 @@ import UIKit
 final class TabOverviewTopToolbar: UIView {
     private enum UX {
         static let toolbarContentHorizontalInset: CGFloat = 32
-        static let actionControlsWidth: CGFloat = 146
+        static let statusRowContentHorizontalInset: CGFloat = 12
         static let actionButtonSpacing: CGFloat = 10
         static let actionControlsTopOffset: CGFloat = 38
         static let tabModeControlHeight: CGFloat = 32
@@ -28,7 +28,9 @@ final class TabOverviewTopToolbar: UIView {
     private let addTabButton = TabOverviewToolbarButton(action: .add)
     private let doneButton = TabOverviewToolbarButton(action: .done)
     private lazy var actionButtonStackView = UIStackView(arrangedSubviews: [clearTabsButton, addTabButton, doneButton])
-    private lazy var liquidGlassActionToolbar = makeLiquidGlassActionToolbar()
+    private var standardConstraints: [NSLayoutConstraint] = []
+    private var statusRowConstraints: [NSLayoutConstraint] = []
+    private var sharesStatusRow = false
     private let tabModeControl = UISegmentedControl(items: [NSLocalizedString("Private", comment: ""), NSLocalizedString("0 Tabs", comment: "")])
     
     override init(frame: CGRect) {
@@ -59,10 +61,19 @@ final class TabOverviewTopToolbar: UIView {
         )
         clearTabsButton.installMenu(clearTabsMenu)
         doneButton.setActionEnabled(hasVisibleTab)
-        if #available(iOS 26.0, *) {
-            liquidGlassActionToolbar.items?.first?.menu = clearTabsMenu
-            liquidGlassActionToolbar.items?.last?.isEnabled = hasVisibleTab
+    }
+    
+    /// In the status items' row the toolbar is exactly the system's region for a top bar: its controls are
+    /// centred in the row and go to its ends, which already stop short of the display's edge and of the
+    /// status items.
+    func setSharesStatusRow(_ sharesStatusRow: Bool) {
+        guard self.sharesStatusRow != sharesStatusRow else {
+            return
         }
+        
+        self.sharesStatusRow = sharesStatusRow
+        NSLayoutConstraint.deactivate(sharesStatusRow ? standardConstraints : statusRowConstraints)
+        NSLayoutConstraint.activate(sharesStatusRow ? statusRowConstraints : standardConstraints)
     }
     
     private func configureAppearance() {
@@ -75,34 +86,33 @@ final class TabOverviewTopToolbar: UIView {
         actionButtonStackView.spacing = UX.actionButtonSpacing
         tabModeControl.translatesAutoresizingMaskIntoConstraints = false
         tabModeControl.selectedSegmentIndex = TabOverview.Mode.regularTabs.rawValue
+        tabModeControl.accessibilityIdentifier = AccessibilityIdentifier.TabOverview.mode
     }
     
     private func configureHierarchy() {
-        if #available(iOS 26.0, *) {
-            addSubview(liquidGlassActionToolbar)
-        } else {
-            addSubview(actionButtonStackView)
-        }
+        addSubview(actionButtonStackView)
         addSubview(tabModeControl)
     }
     
     private func configureConstraints() {
-        let actionControlsView: UIView
-        if #available(iOS 26.0, *) {
-            actionControlsView = liquidGlassActionToolbar
-        } else {
-            actionControlsView = actionButtonStackView
-        }
+        let actionControlsView = actionButtonStackView
         let tabModeMaximumWidthConstraint = tabModeControl.widthAnchor.constraint(equalToConstant: UX.tabModeControlMaximumWidth)
         tabModeMaximumWidthConstraint.priority = .defaultHigh
-        NSLayoutConstraint.activate([
+        standardConstraints = [
             actionControlsView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -UX.toolbarContentHorizontalInset),
-            actionControlsView.widthAnchor.constraint(equalToConstant: UX.actionControlsWidth),
             actionControlsView.centerYAnchor.constraint(equalTo: topAnchor, constant: UX.actionControlsTopOffset),
             tabModeControl.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: UX.toolbarContentHorizontalInset),
+        ]
+        statusRowConstraints = [
+            actionControlsView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -UX.statusRowContentHorizontalInset),
+            actionControlsView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            tabModeControl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: UX.statusRowContentHorizontalInset),
+        ]
+        NSLayoutConstraint.activate(standardConstraints)
+        NSLayoutConstraint.activate([
             tabModeControl.trailingAnchor.constraint(lessThanOrEqualTo: actionControlsView.leadingAnchor, constant: -UX.modeControlToActionControlsSpacing),
             tabModeControl.centerYAnchor.constraint(equalTo: actionControlsView.centerYAnchor),
-            tabModeControl.heightAnchor.constraint(equalToConstant: UX.tabModeControlHeight),
+            tabModeControl.heightAnchor.constraint(greaterThanOrEqualToConstant: UX.tabModeControlHeight),
             tabModeMaximumWidthConstraint,
         ])
     }
@@ -111,25 +121,6 @@ final class TabOverviewTopToolbar: UIView {
         addTabButton.addTarget(self, action: #selector(addTabButtonTapped), for: .touchUpInside)
         doneButton.addTarget(self, action: #selector(doneTapped), for: .touchUpInside)
         tabModeControl.addTarget(self, action: #selector(tabModeControlChanged), for: .valueChanged)
-    }
-    
-    private func makeLiquidGlassActionToolbar() -> UIToolbar {
-        let toolbar = UIToolbar()
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        let clearTabsItem = UIBarButtonItem(barButtonSystemItem: .trash, target: nil, action: nil)
-        let addTabItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addTabButtonTapped))
-        let doneItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(doneTapped))
-        clearTabsItem.tintColor = .label
-        addTabItem.tintColor = .label
-        doneItem.tintColor = .label
-        toolbar.items = [
-            clearTabsItem,
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            addTabItem,
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            doneItem,
-        ]
-        return toolbar
     }
     
     @objc private func addTabButtonTapped() { onAddTab?() }

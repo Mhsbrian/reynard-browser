@@ -35,7 +35,6 @@ final class AddressBarGestures: NSObject {
         static let addressBarTabSwitchCancellationDuration: TimeInterval = 0.22
         static let addressBarAutomaticNewTabTranslationRatio: CGFloat = 0.34
         static let addressBarPreviewOutsidePadding: CGFloat = 24
-        static let addressBarPreviewCornerRadius: CGFloat = 22
         static let addressBarPreviewBorderWidth: CGFloat = 0.5
         static let addressBarPreviewShadowOpacity: Float = 0.18
         static let addressBarPreviewShadowRadius: CGFloat = 14
@@ -254,7 +253,7 @@ final class AddressBarGestures: NSObject {
         container.backgroundColor = UIColor { traitCollection in
             traitCollection.userInterfaceStyle == .dark ? .tertiarySystemBackground : .systemBackground
         }
-        container.layer.cornerRadius = UX.addressBarPreviewCornerRadius
+        container.layer.cornerRadius = BarMetrics.addressBarHeight / 2
         container.layer.cornerCurve = .continuous
         container.layer.borderWidth = UX.addressBarPreviewBorderWidth
         container.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
@@ -282,7 +281,7 @@ final class AddressBarGestures: NSObject {
         
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: UX.addressBarPreviewFontSize, weight: .regular)
+        label.font = BarMetrics.font(ofSize: UX.addressBarPreviewFontSize)
         label.textAlignment = .left
         label.textColor = .label
         label.numberOfLines = 1
@@ -296,13 +295,13 @@ final class AddressBarGestures: NSObject {
         NSLayoutConstraint.activate([
             leadingButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: UX.addressBarPreviewHorizontalInset),
             leadingButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            leadingButton.widthAnchor.constraint(equalToConstant: UX.addressBarPreviewButtonSize),
-            leadingButton.heightAnchor.constraint(equalToConstant: UX.addressBarPreviewButtonSize),
+            leadingButton.widthAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.addressBarPreviewButtonSize)),
+            leadingButton.heightAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.addressBarPreviewButtonSize)),
             
             trailingButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -UX.addressBarPreviewHorizontalInset),
             trailingButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            trailingButton.widthAnchor.constraint(equalToConstant: UX.addressBarPreviewButtonSize),
-            trailingButton.heightAnchor.constraint(equalToConstant: UX.addressBarPreviewButtonSize),
+            trailingButton.widthAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.addressBarPreviewButtonSize)),
+            trailingButton.heightAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.addressBarPreviewButtonSize)),
             
             label.leadingAnchor.constraint(equalTo: leadingButton.trailingAnchor, constant: UX.addressBarPreviewButtonSpacing),
             label.trailingAnchor.constraint(equalTo: trailingButton.leadingAnchor, constant: -UX.addressBarPreviewButtonSpacing),

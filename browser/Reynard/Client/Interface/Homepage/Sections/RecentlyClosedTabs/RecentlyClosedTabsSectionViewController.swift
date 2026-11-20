@@ -13,15 +13,18 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
         static let titleTopSpacing: CGFloat = 14
         static let titleBottomSpacing: CGFloat = 16
         static let titleFontSize: CGFloat = 22
-        static let pillHeight: CGFloat = 44
+        static let basePillHeight: CGFloat = 44
         static let columnSpacing: CGFloat = 10
         static let rowSpacing: CGFloat = 10
         static let shadowMargin: CGFloat = 20
     }
     
-    private static let titleFont = UIFontMetrics(forTextStyle: .title2).scaledFont(
-        for: .systemFont(ofSize: UX.titleFontSize, weight: .bold)
-    )
+    /// A row is as high as its one line of text needs, and never under the 44 points of a touch target.
+    private static var pillHeight: CGFloat {
+        return max(UX.basePillHeight, RecentlyClosedTabCollectionViewCell.titleLineHeight.rounded(.up) + 20)
+    }
+    
+    private static let titleFont = HomepageTextMetrics.headingFont(ofSize: UX.titleFontSize)
     
     weak var delegate: HomepageSectionDelegate?
     
@@ -38,6 +41,9 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
         label.textColor = .label
         label.text = NSLocalizedString("Recently Closed Tabs", comment: "")
         label.adjustsFontForContentSizeCategory = true
+        // A heading wraps before it is cut short, and is a heading to VoiceOver.
+        label.numberOfLines = 0
+        label.accessibilityTraits = .header
         return label
     }()
     
@@ -290,7 +296,7 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
             lastLaidOutWidth = width
             collectionLayout.sectionInset = sectionInset
             collectionLayout.minimumInteritemSpacing = columnSpacing
-            collectionLayout.itemSize = CGSize(width: itemWidth, height: UX.pillHeight)
+            collectionLayout.itemSize = CGSize(width: itemWidth, height: Self.pillHeight)
             collectionLayout.invalidateLayout()
         }
         
@@ -314,7 +320,7 @@ final class RecentlyClosedTabsSectionViewController: UIViewController {
         let verticalInset = collectionLayout.sectionInset.top + collectionLayout.sectionInset.bottom
         let contentHeight = rowCount == 0
         ? verticalInset
-        : verticalInset + (CGFloat(rowCount) * UX.pillHeight) + (CGFloat(rowCount - 1) * UX.rowSpacing)
+        : verticalInset + (CGFloat(rowCount) * Self.pillHeight) + (CGFloat(rowCount - 1) * UX.rowSpacing)
         guard abs((collectionHeightConstraint?.constant ?? 0) - contentHeight) > 0.5 else {
             return
         }

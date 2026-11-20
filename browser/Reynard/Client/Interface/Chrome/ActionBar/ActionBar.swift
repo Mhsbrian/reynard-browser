@@ -11,13 +11,15 @@ enum ActionBarStyle {
     case compact
     case standard
     
+    /// The bars hold a line of text, and grow with it as the address bar does.
     var height: CGFloat {
-        if #available(iOS 26.0, *) { return 68 }
+        let growth = BarMetrics.addressBarGrowth
+        if #available(iOS 26.0, *) { return 68 + growth }
         switch self {
         case .compact:
-            return 41
+            return 41 + growth
         case .standard:
-            return 62
+            return 62 + growth
         }
     }
 }
@@ -100,8 +102,9 @@ final class ActionBar: UIView {
     private var heightConstraint: NSLayoutConstraint!
     private var findInPageBottomConstraint: NSLayoutConstraint!
     
+    // The close button is drawn at 28 points and answers touches in 44.
     private let closeShadowView: UIView = {
-        let view = UIView()
+        let view = TouchTargetExtendingView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.backgroundColor = .clear
         view.layer.cornerCurve = .continuous
@@ -125,7 +128,7 @@ final class ActionBar: UIView {
         view.layer.cornerCurve = .continuous
         view.layer.cornerRadius = UX.closeButtonCornerRadius
         view.layer.borderWidth = UX.borderWidth
-        view.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        view.layer.borderColor = AccessibilityAppearance.hairlineColor.cgColor
         view.clipsToBounds = true
         return view
     }()
@@ -133,12 +136,13 @@ final class ActionBar: UIView {
     private let topBorderView: UIView = {
         let view = UIView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.backgroundColor = UIColor.separator.withAlphaComponent(0.2)
+        view.backgroundColor = AccessibilityAppearance.hairlineColor
         return view
     }()
     
     private lazy var closeButton: UIButton = {
-        let button = UIButton(type: .system)
+        let button = MinimumTouchTargetButton(type: .system)
+        button.accessibilityLabel = NSLocalizedString("Done", comment: "")
         button.translatesAutoresizingMaskIntoConstraints = false
         let configuration = UIImage.SymbolConfiguration(pointSize: UX.closeSymbolPointSize, weight: .regular)
         button.setImage(UIImage(named: "reynard.xmark", in: .main, with: configuration), for: .normal)
@@ -167,6 +171,13 @@ final class ActionBar: UIView {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            updateHeight()
+        }
     }
     
     override func safeAreaInsetsDidChange() {

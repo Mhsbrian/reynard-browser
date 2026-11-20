@@ -9,9 +9,9 @@ import UIKit
 
 final class BottomToolbar: UIView {
     private enum UX {
-        static let bottomToolbarStandardContentHeight: CGFloat = 94
+        static let bottomToolbarStandardBaseContentHeight: CGFloat = 94
         static let bottomToolbarCompactContentHeight: CGFloat = 44
-        static let bottomToolbarAddressOnlyContentHeight: CGFloat = 60
+        static let bottomToolbarAddressOnlyBaseContentHeight: CGFloat = 60
         static let bottomToolbarButtonStackHeight: CGFloat = 30
         static let bottomToolbarButtonStackBottomInset: CGFloat = 5
         static let addressBarHorizontalInset: CGFloat = 12
@@ -36,6 +36,16 @@ final class BottomToolbar: UIView {
         case empty
     }
     
+    /// The address bar with the buttons under it. The address bar grows with the text size and takes the
+    /// toolbar with it; the row of buttons keeps its height.
+    private static var standardContentHeight: CGFloat {
+        return UX.bottomToolbarStandardBaseContentHeight + BarMetrics.addressBarGrowth
+    }
+    
+    private static var addressOnlyContentHeight: CGFloat {
+        return UX.bottomToolbarAddressOnlyBaseContentHeight + BarMetrics.addressBarGrowth
+    }
+    
     var onBack: (() -> Void)?
     var onForward: (() -> Void)?
     var onShare: (() -> Void)?
@@ -43,8 +53,9 @@ final class BottomToolbar: UIView {
     var onDownloads: (() -> Void)?
     var onTabOverview: (() -> Void)?
     
+    // The buttons are drawn 30 points high and answer touches in 44: the views they sit in let those through.
     private let contentView: UIView = {
-        let view = UIView()
+        let view = TouchTargetExtendingView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.backgroundColor = .clear
         return view
@@ -73,9 +84,8 @@ final class BottomToolbar: UIView {
     }()
     
     private let keyboardDockedBlurView: UIView = {
-        let view = VariableBlurView()
+        let view = FadingBackdropView(direction: .up, solidColor: AccessibilityAppearance.solidBarColor)
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.direction = .up
         view.isHidden = true
         return view
     }()
@@ -89,7 +99,7 @@ final class BottomToolbar: UIView {
     private let buttonMenus = ToolbarButtonMenus()
     
     private lazy var buttons: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [backButton, forwardButton, shareButton, libraryButton, downloadButton, tabOverviewButton])
+        let stack = TouchTargetExtendingStackView(arrangedSubviews: [backButton, forwardButton, shareButton, libraryButton, downloadButton, tabOverviewButton])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .horizontal
         stack.distribution = .fillEqually
@@ -133,7 +143,7 @@ final class BottomToolbar: UIView {
     // MARK: - Layout
     
     func configureTopAnchor(to safeAreaBottomAnchor: NSLayoutYAxisAnchor) {
-        topConstraint = topAnchor.constraint(equalTo: safeAreaBottomAnchor, constant: -UX.bottomToolbarStandardContentHeight)
+        topConstraint = topAnchor.constraint(equalTo: safeAreaBottomAnchor, constant: -Self.standardContentHeight)
         topConstraint.isActive = true
     }
     
@@ -186,11 +196,11 @@ final class BottomToolbar: UIView {
         let contentHeight: CGFloat
         switch state {
         case .hidden, .standard:
-            contentHeight = UX.bottomToolbarStandardContentHeight
+            contentHeight = Self.standardContentHeight
         case .collapsed, .compact:
             contentHeight = UX.bottomToolbarCompactContentHeight
         case .addressOnly:
-            contentHeight = UX.bottomToolbarAddressOnlyContentHeight
+            contentHeight = Self.addressOnlyContentHeight
         case .empty:
             contentHeight = 0
         }
@@ -274,10 +284,7 @@ final class BottomToolbar: UIView {
     }
     
     func setMenuButtonIndicatesUpdate(_ hasUpdate: Bool) {
-        libraryButton.setImage(
-            hasUpdate ? UIImage(named: "reynard.ellipsis.circle.badge") : UIImage(named: "reynard.ellipsis.circle"),
-            for: .normal
-        )
+        libraryButton.setIndicatesUpdate(hasUpdate)
     }
     
     // MARK: - Action Wiring
@@ -305,7 +312,7 @@ final class BottomToolbar: UIView {
     }
     
     private func configureConstraints() {
-        contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: UX.bottomToolbarStandardContentHeight)
+        contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: Self.standardContentHeight)
         standardButtonsBottomConstraint = buttons.bottomAnchor.constraint(
             equalTo: contentView.bottomAnchor,
             constant: -UX.bottomToolbarButtonStackBottomInset

@@ -20,6 +20,13 @@ final class RecentlyClosedTabCollectionViewCell: UICollectionViewCell {
     
     static let reuseIdentifier = "RecentlyClosedTabCollectionViewCell"
     
+    /// The height of a line of the row's text at the text size in use now.
+    static var titleLineHeight: CGFloat {
+        return UIFontMetrics(forTextStyle: .subheadline)
+            .scaledFont(for: .systemFont(ofSize: UX.titleFontSize, weight: .regular))
+            .lineHeight
+    }
+    
     private static let titleFont = UIFontMetrics(forTextStyle: .subheadline).scaledFont(
         for: .systemFont(ofSize: UX.titleFontSize, weight: .regular)
     )
@@ -80,6 +87,11 @@ final class RecentlyClosedTabCollectionViewCell: UICollectionViewCell {
     func configure(tab: TabManagementStore.RecentlyClosedTabSnapshot) {
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
         titleLabel.text = title.isEmpty ? NSLocalizedString("Untitled", comment: "") : title
+        
+        isAccessibilityElement = true
+        accessibilityLabel = titleLabel.text
+        accessibilityTraits = .button
+        accessibilityIdentifier = AccessibilityIdentifier.Homepage.recentlyClosed
     }
     
     // MARK: - Configuration

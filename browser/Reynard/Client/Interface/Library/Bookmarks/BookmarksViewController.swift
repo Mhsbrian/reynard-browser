@@ -13,7 +13,6 @@ final class BookmarksViewController: UIViewController, UITableViewDataSource, UI
         static let sectionHeaderTopPadding: CGFloat = 0
         static let headerMenuButtonTrailingInset: CGFloat = 20
         static let emptyStateFontSize: CGFloat = 16
-        static let groupedSectionHeaderHeight: CGFloat = 34
     }
     
     private let folderID: String?
@@ -83,7 +82,8 @@ final class BookmarksViewController: UIViewController, UITableViewDataSource, UI
     private let emptyLabel: UILabel = {
         let label = UILabel()
         label.text = NSLocalizedString("No matching bookmarks", comment: "")
-        label.font = .systemFont(ofSize: UX.emptyStateFontSize, weight: .medium)
+        label.font = .scaledSystemFont(ofSize: UX.emptyStateFontSize, weight: .medium)
+        label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         return label
@@ -223,7 +223,7 @@ final class BookmarksViewController: UIViewController, UITableViewDataSource, UI
     }
     
     func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return UX.groupedSectionHeaderHeight
+        return LibrarySharedUtils.groupedSectionHeaderHeight
     }
     
     // MARK: - UITableViewDelegate
@@ -554,10 +554,26 @@ final class BookmarksViewController: UIViewController, UITableViewDataSource, UI
         setEditing(true, animated: true)
     }
     
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.hasVerticalBars != traitCollection.hasVerticalBars, isViewLoaded {
+            updateBookmarkMenu()
+        }
+    }
+    
     // MARK: - Menu
     
     private func updateBookmarkMenu() {
-        let symbolName = isEditing ? "reynard.checkmark" : "reynard.ellipsis"
+        // In a bar the system has stood on its side an ellipsis is the system's own overflow menu, so there
+        // this menu, which sorts the list before anything else, shows the symbol for sorting.
+        let menuSymbolName = traitCollection.hasVerticalBars ? "reynard.arrow.up.arrow.down" : "reynard.ellipsis"
+        let symbolName = isEditing ? "reynard.checkmark" : menuSymbolName
+        let name = isEditing
+        ? NSLocalizedString("Done", comment: "")
+        : NSLocalizedString("More", comment: "The button that opens a menu of further actions")
+        bookmarkMenuItem.accessibilityLabel = name
+        bookmarkMenuItem.title = name
+        bookmarkMenuButton.accessibilityLabel = name
         
         if showsNavigationMenu {
             bookmarkMenuItem.image = UIImage(named: symbolName)

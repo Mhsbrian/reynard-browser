@@ -31,6 +31,13 @@ final class BrowserPreferences {
     
     func registerDefaults() {
         let donationRecommendationShowTimeKey = key("HomepageSettings", "donationRecommendationShowTime")
+        // The welcome is for a new install. Someone who was already using Reynard when it was added has
+        // nothing to be welcomed to: the donation time below is there from the first launch of any version.
+        let hasSeenWelcomeKey = key("HomepageSettings", "hasSeenWelcome")
+        if UserDefaults.standard.object(forKey: hasSeenWelcomeKey) == nil {
+            let isExistingInstall = UserDefaults.standard.object(forKey: donationRecommendationShowTimeKey) != nil
+            UserDefaults.standard.set(isExistingInstall, forKey: hasSeenWelcomeKey)
+        }
         if UserDefaults.standard.object(forKey: donationRecommendationShowTimeKey) == nil {
             let delay = TimeInterval.random(in: (3 * 86_400)...(5 * 86_400))
             UserDefaults.standard.set(Date().addingTimeInterval(delay).timeIntervalSince1970, forKey: donationRecommendationShowTimeKey)
@@ -718,6 +725,20 @@ final class BrowserPreferences {
             }
             set {
                 prefs.set(newValue, forSetting: "HomepageSettings", key: "recentlyClosedTabLimit")
+                NotificationCenter.default.post(name: .homepageSettingsDidChange, object: nil)
+            }
+        }
+        
+        /// Whether the first-run welcome has been dismissed. It is shown once per install.
+        static var hasSeenWelcome: Bool {
+            get {
+                return prefs.bool(forSetting: "HomepageSettings", key: "hasSeenWelcome")
+            }
+            set {
+                guard newValue != hasSeenWelcome else {
+                    return
+                }
+                prefs.set(newValue, forSetting: "HomepageSettings", key: "hasSeenWelcome")
                 NotificationCenter.default.post(name: .homepageSettingsDidChange, object: nil)
             }
         }

@@ -29,7 +29,8 @@ final class KeyboardDismissalActionBar: UIView {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.setTitle(NSLocalizedString("Done", comment: "Dismiss keyboard button"), for: .normal)
         button.setTitleColor(.systemBlue, for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: UX.fontSize, weight: .semibold)
+        button.titleLabel?.font = BarMetrics.font(ofSize: UX.fontSize, weight: .semibold)
+        button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.addTarget(self, action: #selector(doneTapped), for: .touchUpInside)
         return button
     }()

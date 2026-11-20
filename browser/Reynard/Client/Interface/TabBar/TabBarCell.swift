@@ -11,7 +11,6 @@ final class TabBarCell: UICollectionViewCell {
     private enum UX {
         static let expandedTabMinimumWidth: CGFloat = 220
         static let collapsedTabMinimumWidth: CGFloat = 96
-        static let tabTitleFontSize: CGFloat = 14
         static let tabTitleSpacing: CGFloat = 6
         static let tabFaviconSideLength: CGFloat = 16
         static let tabFaviconCornerRadius: CGFloat = 3
@@ -80,13 +79,16 @@ final class TabBarCell: UICollectionViewCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = UIFont.systemFont(ofSize: UX.tabTitleFontSize, weight: .semibold)
+        label.font = BarMetrics.font(ofSize: BarMetrics.tabBarTextSize, weight: .semibold)
+        label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
         label.numberOfLines = 1
         label.textAlignment = .center
         return label
     }()
     
+    // Drawn at 22 points. The cell gives it a touch target 44 points wide and as high as the strip: see
+    // `closeButtonHitFrame`.
     private let closeButton: UIButton = {
         let button = UIButton(type: .system)
         if #available(iOS 13.4, *) {
@@ -100,6 +102,8 @@ final class TabBarCell: UICollectionViewCell {
         )
         button.tintColor = .secondaryLabel
         button.isHidden = true
+        button.accessibilityLabel = NSLocalizedString("Close Tab", comment: "")
+        button.accessibilityIdentifier = AccessibilityIdentifier.TabBar.closeTab
         return button
     }()
     
@@ -118,6 +122,7 @@ final class TabBarCell: UICollectionViewCell {
     private var expandedLeadingConstraint: NSLayoutConstraint!
     private var collapsedLeadingConstraint: NSLayoutConstraint!
     private var expandedTitleWidthConstraint: NSLayoutConstraint!
+    private var faviconSizeConstraints: [NSLayoutConstraint] = []
     
     // MARK: - Lifecycle
     
@@ -144,11 +149,38 @@ final class TabBarCell: UICollectionViewCell {
     
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
-        guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else {
+        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            faviconSizeConstraints.forEach { $0.constant = BarMetrics.scaled(UX.tabFaviconSideLength) }
+        }
+        guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle
+                || previousTraitCollection?.accessibilityContrast != traitCollection.accessibilityContrast else {
             return
         }
         
         updateBorderColor()
+    }
+    
+    // MARK: - Accessibility
+    
+    // A tab is one element: its title, whether it is the one shown, and closing it as an action. The close
+    // button is only there on the selected tab, and the action is there on all of them.
+    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            return [UIAccessibilityCustomAction(
+                name: NSLocalizedString("Close Tab", comment: ""),
+                target: self,
+                selector: #selector(handleAccessibilityClose)
+            )]
+        }
+        set {}
+    }
+    
+    @objc private func handleAccessibilityClose() -> Bool {
+        guard let closeHandler else {
+            return false
+        }
+        closeHandler()
+        return true
     }
     
     // MARK: - Configuration
@@ -181,6 +213,11 @@ final class TabBarCell: UICollectionViewCell {
         collapsedTrailingConstraint.isActive = isCollapsed
         expandedTitleWidthConstraint.isActive = !isCollapsed
         closeButton.isHidden = isCollapsed || !isSelected
+        
+        isAccessibilityElement = true
+        accessibilityLabel = displayTitle
+        accessibilityTraits = isSelected ? [.button, .selected] : .button
+        accessibilityIdentifier = AccessibilityIdentifier.TabBar.tab
     }
     
     func containsCloseButton(at point: CGPoint) -> Bool {
@@ -188,8 +225,27 @@ final class TabBarCell: UICollectionViewCell {
             return false
         }
         
-        let convertedPoint = convert(point, to: tabContentView)
-        return closeButton.frame.contains(convertedPoint)
+        return closeButtonHitFrame.contains(point)
+    }
+    
+    /// Where a touch closes the tab, in the cell's coordinates: the cell's end, from 44 points before the
+    /// button's far edge, top to bottom.
+    private var closeButtonHitFrame: CGRect {
+        let buttonFrame = closeButton.convert(closeButton.bounds, to: self)
+        let isRightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let near = isRightToLeft
+        ? min(buttonFrame.minX + TouchTarget.minimumSideLength, bounds.maxX)
+        : max(buttonFrame.maxX - TouchTarget.minimumSideLength, bounds.minX)
+        return isRightToLeft
+        ? CGRect(x: bounds.minX, y: bounds.minY, width: near - bounds.minX, height: bounds.height)
+        : CGRect(x: near, y: bounds.minY, width: bounds.maxX - near, height: bounds.height)
+    }
+    
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if containsCloseButton(at: point), self.point(inside: point, with: event) {
+            return closeButton
+        }
+        return super.hitTest(point, with: event)
     }
     
     // MARK: - View Setup
@@ -227,6 +283,12 @@ final class TabBarCell: UICollectionViewCell {
         collapsedLeadingConstraint = titleStack.leadingAnchor.constraint(greaterThanOrEqualTo: tabContentView.leadingAnchor, constant: UX.collapsedTabContentHorizontalInset)
         expandedTitleWidthConstraint = titleLabel.widthAnchor.constraint(lessThanOrEqualTo: tabContentView.widthAnchor, constant: -UX.expandedTabTitleWidthInset)
         
+        faviconSizeConstraints = [
+            faviconView.widthAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.tabFaviconSideLength)),
+            faviconView.heightAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.tabFaviconSideLength)),
+        ]
+        NSLayoutConstraint.activate(faviconSizeConstraints)
+        
         NSLayoutConstraint.activate([
             tabContentView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: UX.contentInsets.left),
             tabContentView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -UX.contentInsets.right),
@@ -238,9 +300,6 @@ final class TabBarCell: UICollectionViewCell {
             expandedLeadingConstraint,
             expandedTrailingConstraint,
             
-            faviconView.widthAnchor.constraint(equalToConstant: UX.tabFaviconSideLength),
-            faviconView.heightAnchor.constraint(equalToConstant: UX.tabFaviconSideLength),
-            
             expandedTitleWidthConstraint,
             
             closeButton.trailingAnchor.constraint(equalTo: tabContentView.trailingAnchor, constant: -UX.tabCloseButtonTrailingInset),
@@ -251,7 +310,7 @@ final class TabBarCell: UICollectionViewCell {
     }
     
     private func updateBorderColor() {
-        tabContentView.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        tabContentView.layer.borderColor = AccessibilityAppearance.hairlineColor.resolvedColor(with: traitCollection).cgColor
     }
     
     // MARK: - Actions

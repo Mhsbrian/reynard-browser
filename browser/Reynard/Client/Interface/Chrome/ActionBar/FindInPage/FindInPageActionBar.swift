@@ -15,22 +15,26 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
             if #available(iOS 26.0, *) { return 8 }
             return 12
         }
+        // The field's text follows the text size, and the row grows with it.
         static var controlsHeight: CGFloat {
-            if #available(iOS 26.0, *) { return 48 }
-            return 38
+            if #available(iOS 26.0, *) { return 48 + BarMetrics.addressBarGrowth }
+            return 38 + BarMetrics.addressBarGrowth
         }
         static let searchContentInset: CGFloat = 12
-        static let resultLabelWidth: CGFloat = 52
+        static var resultLabelWidth: CGFloat { return BarMetrics.scaled(52) }
+        static let resultFontSize: CGFloat = 16
         static let resultLabelSpacing: CGFloat = 10
         static var controlsWidth: CGFloat { return controlButtonWidth * 2 + separatorWidth }
         static var controlButtonWidth: CGFloat {
-            if #available(iOS 26.0, *) { return 40 }
+            if #available(iOS 26.0, *) { return TouchTarget.minimumSideLength }
             return 55
         }
         static let separatorWidth: CGFloat = 1
         static var controlsCornerRadius: CGFloat { return controlsHeight / 2 }
         static let controlSymbolPointSize: CGFloat = 14
-        static let doneSymbolColor = UIColor(red: 0.35, green: 1, blue: 1, alpha: 1)
+        // The checkmark sits on glass tinted with the system's blue, where the system's own prominent
+        // buttons draw their symbols in white.
+        static let doneSymbolColor = UIColor.white
         static var contentTrailingInset: CGFloat {
             if #available(iOS 26.0, *) { return 12 }
             return 53
@@ -73,7 +77,10 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
         field.borderStyle = .none
         field.placeholder = NSLocalizedString("Find", comment: "Find in page search placeholder")
         field.textColor = .label
-        field.font = UIFont.systemFont(ofSize: 17)
+        field.font = BarMetrics.font(ofSize: BarMetrics.addressBarTextSize)
+        field.adjustsFontForContentSizeCategory = true
+        field.accessibilityLabel = NSLocalizedString("Find in Page", comment: "")
+        field.accessibilityIdentifier = AccessibilityIdentifier.FindInPage.textField
         field.clearButtonMode = .never
         field.autocapitalizationType = .none
         field.autocorrectionType = .no
@@ -85,7 +92,12 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
     private let resultLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = UIFont.monospacedDigitSystemFont(ofSize: 16, weight: .regular)
+        label.font = UIFontMetrics(forTextStyle: .body).scaledFont(
+            for: .monospacedDigitSystemFont(ofSize: UX.resultFontSize, weight: .regular),
+            maximumPointSize: UX.resultFontSize * BarMetrics.maximumTextScale
+        )
+        label.adjustsFontForContentSizeCategory = true
+        label.accessibilityIdentifier = AccessibilityIdentifier.FindInPage.count
         label.textColor = .secondaryLabel
         label.textAlignment = .right
         label.lineBreakMode = .byClipping
@@ -118,7 +130,7 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
         view.layer.cornerCurve = .continuous
         view.layer.cornerRadius = UX.controlsCornerRadius
         view.layer.borderWidth = UX.borderWidth
-        view.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        view.layer.borderColor = AccessibilityAppearance.hairlineColor.cgColor
         view.clipsToBounds = true
         return view
     }()
@@ -148,18 +160,22 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
         view.layer.cornerCurve = .continuous
         view.layer.cornerRadius = UX.controlsCornerRadius
         view.layer.borderWidth = UX.borderWidth
-        view.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        view.layer.borderColor = AccessibilityAppearance.hairlineColor.cgColor
         view.clipsToBounds = true
         return view
     }()
     
     private lazy var previousMatchButton = makeControlButton(
         imageName: "reynard.chevron.up",
+        title: NSLocalizedString("Previous Match", comment: "The button that goes to the previous place the searched text is found in the page"),
+        identifier: AccessibilityIdentifier.FindInPage.previous,
         action: #selector(previousMatchTapped)
     )
     
     private lazy var nextMatchButton = makeControlButton(
         imageName: "reynard.chevron.down",
+        title: NSLocalizedString("Next Match", comment: "The button that goes to the next place the searched text is found in the page"),
+        identifier: AccessibilityIdentifier.FindInPage.next,
         action: #selector(nextMatchTapped)
     )
     
@@ -172,6 +188,10 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
     
     private var doneToolbar: UIToolbar?
     private var requestID = 0
+    private var lastAnnouncedResult: String?
+    private var controlsHeightConstraints: [NSLayoutConstraint] = []
+    private var controlButtonWidthConstraints: [NSLayoutConstraint] = []
+    private var resultLabelWidthConstraint: NSLayoutConstraint!
     private var searchContentViewCenterConstraint: NSLayoutConstraint!
     private var searchContentViewLeadingConstraint: NSLayoutConstraint!
     private var searchContentViewTrailingConstraint: NSLayoutConstraint!
@@ -193,6 +213,22 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory else {
+            return
+        }
+        
+        controlsHeightConstraints.forEach { $0.constant = UX.controlsHeight }
+        resultLabelWidthConstraint.constant = UX.resultLabelWidth
+        if #unavailable(iOS 26.0) {
+            for view in [searchBarShadowView, searchBarBackground, controlsShadowView, controlsBackground] {
+                view.layer.cornerRadius = UX.controlsCornerRadius
+            }
+        }
+        setNeedsLayout()
     }
     
     override func layoutSubviews() {
@@ -256,6 +292,21 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
         let currentText = max(current, 0)
         let totalText = total >= 0 ? String(total) : "?"
         setResultText("\(currentText)/\(totalText)")
+        
+        // "3/12" is read as a fraction. VoiceOver gets the count in words, and hears it when it changes:
+        // the matches are found while the keyboard has the focus.
+        let spoken = total >= 0
+        ? String.localizedStringWithFormat(
+            NSLocalizedString("Match %1$d of %2$d", comment: "Find in page: which match is shown, and how many there are"),
+            currentText,
+            total
+        )
+        : resultLabel.text
+        resultLabel.accessibilityLabel = spoken
+        if spoken != lastAnnouncedResult {
+            lastAnnouncedResult = spoken
+            UIAccessibility.post(notification: .announcement, argument: spoken)
+        }
     }
     
     // MARK: - UITextFieldDelegate
@@ -317,6 +368,7 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
     private func configureAppearance() {
         translatesAutoresizingMaskIntoConstraints = false
         backgroundColor = .clear
+        accessibilityIdentifier = AccessibilityIdentifier.FindInPage.bar
         if #available(iOS 26.0, *) {
             backgroundView.isHidden = true
             separator.isHidden = true
@@ -350,6 +402,8 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
                 .withTintColor(UX.doneSymbolColor, renderingMode: .alwaysOriginal)
             let doneItem = UIBarButtonItem(image: image, style: .plain, target: self, action: #selector(doneTapped))
             
+            doneItem.accessibilityLabel = NSLocalizedString("Done", comment: "")
+            doneItem.accessibilityIdentifier = AccessibilityIdentifier.FindInPage.done
             doneItem.hidesSharedBackground = true
             toolbar.items = [doneItem]
             background.contentView.addSubview(toolbar)
@@ -388,6 +442,13 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
                 doneToolbar.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
             ])
         }
+        controlsHeightConstraints = [
+            searchContentView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
+            searchBarShadowView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
+            controlsShadowView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
+        ]
+        NSLayoutConstraint.activate(controlsHeightConstraints)
+        resultLabelWidthConstraint = resultLabel.widthAnchor.constraint(equalToConstant: UX.resultLabelWidth)
         let preferredContentWidth = searchContentView.widthAnchor.constraint(
             equalToConstant: UX.contentMaximumWidth
         )
@@ -422,14 +483,12 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
             ),
             searchContentView.widthAnchor.constraint(lessThanOrEqualToConstant: UX.contentMaximumWidth),
             preferredContentWidth,
-            searchContentView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
             
             searchBarShadowView.leadingAnchor.constraint(
                 equalTo: doneToolbar?.trailingAnchor ?? searchContentView.leadingAnchor,
                 constant: doneToolbar == nil ? 0 : UX.searchBarToControlsSpacing
             ),
             searchBarShadowView.centerYAnchor.constraint(equalTo: searchContentView.centerYAnchor),
-            searchBarShadowView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
             searchBarShadowView.trailingAnchor.constraint(
                 equalTo: controlsShadowView.leadingAnchor,
                 constant: -UX.searchBarToControlsSpacing
@@ -453,12 +512,11 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
                 constant: -UX.searchContentInset
             ),
             resultLabel.centerYAnchor.constraint(equalTo: searchBarBackground.contentView.centerYAnchor),
-            resultLabel.widthAnchor.constraint(equalToConstant: UX.resultLabelWidth),
+            resultLabelWidthConstraint,
             
             controlsShadowView.trailingAnchor.constraint(equalTo: searchContentView.trailingAnchor),
             controlsShadowView.centerYAnchor.constraint(equalTo: searchContentView.centerYAnchor),
             controlsShadowView.widthAnchor.constraint(equalToConstant: UX.controlsWidth),
-            controlsShadowView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
             
             controlsBackground.topAnchor.constraint(equalTo: controlsShadowView.topAnchor),
             controlsBackground.leadingAnchor.constraint(equalTo: controlsShadowView.leadingAnchor),
@@ -511,9 +569,14 @@ final class FindInPageActionBar: UIView, UITextFieldDelegate {
     
     private func makeControlButton(
         imageName: String,
+        title: String,
+        identifier: String,
         action: Selector
     ) -> UIButton {
         let button = UIButton(type: .system)
+        button.accessibilityLabel = title
+        button.accessibilityIdentifier = identifier
+        button.enableLargeContentViewer(title: title, image: UIImage(named: imageName))
         button.translatesAutoresizingMaskIntoConstraints = false
         let configuration = UIImage.SymbolConfiguration(
             pointSize: UX.controlSymbolPointSize,

@@ -8,6 +8,7 @@
 import UIKit
 
 enum HomepageRecommendation: CaseIterable, Hashable {
+    case welcome
     case performance
     case updateAvailable
     case donation
@@ -19,13 +20,25 @@ enum HomepageSection: CaseIterable, Hashable {
     case favorites
     case frequentlyVisited
     case recentlyClosedTabs
+    /// What the page says when every other section has nothing to show.
+    case emptyState
     
+    /// From the top of the homepage to its foot.
+    ///
+    /// The cards that are about the moment come first: the welcome on a new install, an update that is
+    /// waiting. Then what people come to the page for. The standing advice to enable JIT is at the foot,
+    /// where it can be read and acted on without being the first thing on every new tab.
     static var allCases: [HomepageSection] {
-        return HomepageRecommendation.allCases.map { .recommendation($0) } + [
+        return [
+            .recommendation(.welcome),
+            .recommendation(.updateAvailable),
+            .recommendation(.donation),
             .privateBrowsing,
             .favorites,
             .frequentlyVisited,
             .recentlyClosedTabs,
+            .emptyState,
+            .recommendation(.performance),
         ]
     }
 }

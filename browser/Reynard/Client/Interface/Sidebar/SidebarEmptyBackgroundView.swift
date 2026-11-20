@@ -34,7 +34,8 @@ final class SidebarEmptyBackgroundView: UIView {
     
     private let messageLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFont.systemFont(ofSize: UX.messageFontSize, weight: .medium)
+        label.font = .scaledSystemFont(ofSize: UX.messageFontSize, weight: .medium)
+        label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0

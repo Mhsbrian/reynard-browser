@@ -584,6 +584,8 @@ final class TabBarCollection: UICollectionView, UIGestureRecognizerDelegate {
                 return
             }
             self.tabBar?.updateReorderState(.active)
+            // The tab comes loose from the strip: the same impact a favorite gives when it is picked up.
+            Haptics.rigid()
         }
         reorderStartWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + UX.tabReorderStartDelay, execute: workItem)

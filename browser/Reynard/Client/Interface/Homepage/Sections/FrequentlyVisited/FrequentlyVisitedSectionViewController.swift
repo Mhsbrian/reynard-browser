@@ -14,7 +14,8 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
         static let titleBottomSpacing: CGFloat = 14
         static let titleFontSize: CGFloat = 22
         static let cardWidth: CGFloat = 150
-        static let cardHeight: CGFloat = 120
+        static let baseCardHeight: CGFloat = 120
+        static let baseCardTitleHeight: CGFloat = 30
         static let cardSpacing: CGFloat = 16
         static let shadowMargin: CGFloat = 20
     }
@@ -32,9 +33,12 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
         }
     }
     
-    private static let titleFont = UIFontMetrics(forTextStyle: .title2).scaledFont(
-        for: .systemFont(ofSize: UX.titleFontSize, weight: .bold)
-    )
+    /// A card is as high as its picture and the two lines of its name at the text size in use.
+    private static var cardHeight: CGFloat {
+        return UX.baseCardHeight + FrequentlyVisitedSiteCardView.titleHeight - UX.baseCardTitleHeight
+    }
+    
+    private static let titleFont = HomepageTextMetrics.headingFont(ofSize: UX.titleFontSize)
     
     weak var delegate: HomepageSectionDelegate?
     
@@ -52,6 +56,9 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
         label.textColor = .label
         label.text = NSLocalizedString("Frequently Visited", comment: "")
         label.adjustsFontForContentSizeCategory = true
+        // A heading wraps before it is cut short, and is a heading to VoiceOver.
+        label.numberOfLines = 0
+        label.accessibilityTraits = .header
         return label
     }()
     
@@ -141,13 +148,13 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: -UX.shadowMargin),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: UX.shadowMargin),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: UX.cardHeight + (UX.shadowMargin * 2)),
+            scrollView.heightAnchor.constraint(equalToConstant: Self.cardHeight + (UX.shadowMargin * 2)),
             
             cardStackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: UX.shadowMargin),
             cardStackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -UX.shadowMargin),
             cardStackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: UX.shadowMargin),
             cardStackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -UX.shadowMargin),
-            cardStackView.heightAnchor.constraint(equalToConstant: UX.cardHeight),
+            cardStackView.heightAnchor.constraint(equalToConstant: Self.cardHeight),
         ])
     }
     
@@ -274,7 +281,7 @@ final class FrequentlyVisitedSectionViewController: UIViewController {
             
             NSLayoutConstraint.activate([
                 cardView.widthAnchor.constraint(equalToConstant: UX.cardWidth),
-                cardView.heightAnchor.constraint(equalToConstant: UX.cardHeight),
+                cardView.heightAnchor.constraint(equalToConstant: Self.cardHeight),
             ])
             
             return cardView

@@ -24,9 +24,12 @@ final class FrequentlyVisitedSiteCardView: UIControl {
         static let shadowOffsetHeight: CGFloat = 2
     }
     
-    private static let titleFont = UIFontMetrics(forTextStyle: .caption1).scaledFont(
-        for: .systemFont(ofSize: UX.titleFontSize, weight: .regular)
-    )
+    private static let titleFont = HomepageTextMetrics.tileTitleFont(weight: .regular)
+    
+    /// The room the tile's name takes under its icon at the text size in use.
+    static var titleHeight: CGFloat {
+        return HomepageTextMetrics.tileTitleHeight(weight: .regular, minimum: UX.titleHeight)
+    }
     
     private let backgroundView: UIVisualEffectView = {
         let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
@@ -100,8 +103,23 @@ final class FrequentlyVisitedSiteCardView: UIControl {
     }
     
     
+    private var dragURL: String?
+    private var dragTitle: String?
+    
     func configure(site: HistorySiteSnapshot, metadata: SiteMetadataSnapshot?) {
         titleLabel.text = site.title
+        dragURL = site.url.absoluteString
+        dragTitle = site.title
+        isAccessibilityElement = true
+        accessibilityLabel = site.title
+        accessibilityTraits = .button
+        accessibilityIdentifier = AccessibilityIdentifier.Homepage.frequentlyVisited
+        enableLargeContentViewer(title: site.title)
+        if !interactions.contains(where: { $0 is UIDragInteraction }) {
+            let dragInteraction = UIDragInteraction(delegate: self)
+            dragInteraction.isEnabled = true
+            addInteraction(dragInteraction)
+        }
         iconView.configure(url: site.url)
         
         if let image = metadata?.ogImage {
@@ -143,6 +161,7 @@ final class FrequentlyVisitedSiteCardView: UIControl {
     }
     
     private func configureConstraints() {
+        let titleHeightConstraint = titleLabel.heightAnchor.constraint(equalToConstant: Self.titleHeight)
         NSLayoutConstraint.activate([
             backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
             backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -167,7 +186,7 @@ final class FrequentlyVisitedSiteCardView: UIControl {
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: UX.titleHorizontalInset),
             titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -UX.titleHorizontalInset),
             titleLabel.topAnchor.constraint(equalTo: previewView.bottomAnchor, constant: UX.titleTopSpacing),
-            titleLabel.heightAnchor.constraint(equalToConstant: UX.titleHeight),
+            titleHeightConstraint,
             titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -UX.titleBottomSpacing),
         ])
     }
@@ -200,5 +219,11 @@ private final class FrequentlyVisitedCardLabel: UILabel {
     
     override func drawText(in rect: CGRect) {
         super.drawText(in: textRect(forBounds: rect, limitedToNumberOfLines: numberOfLines))
+    }
+}
+
+extension FrequentlyVisitedSiteCardView: UIDragInteractionDelegate {
+    func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
+        return LinkDragAndDrop.dragItems(for: dragURL, title: dragTitle)
     }
 }

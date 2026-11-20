@@ -39,16 +39,24 @@ final class AddressBarButton: UIButton {
         contentHorizontalAlignment = .fill
         contentVerticalAlignment = .fill
         contentEdgeInsets = .zero
-        setPreferredSymbolConfiguration(
-            UIImage.SymbolConfiguration(pointSize: UX.addressBarButtonSymbolPointSize, weight: .regular),
-            forImageIn: .normal
-        )
+        applySymbolScale()
         if #unavailable(iOS 14.0) {
             let delegate = LegacyContextMenuDelegate(owner: self)
             addInteraction(UIContextMenuInteraction(delegate: delegate))
             legacyMenuDelegate = delegate
             addTarget(self, action: #selector(handleLegacyPrimaryTap), for: .touchUpInside)
         }
+    }
+    
+    /// The symbol follows the text beside it as the text size changes.
+    func applySymbolScale() {
+        setPreferredSymbolConfiguration(
+            UIImage.SymbolConfiguration(
+                pointSize: BarMetrics.scaled(UX.addressBarButtonSymbolPointSize),
+                weight: .regular
+            ),
+            forImageIn: .normal
+        )
     }
     
     @objc private func handleLegacyPrimaryTap() {
@@ -181,9 +189,16 @@ final class AddressBarButton: UIButton {
             return false
         }
         
+        // Twice the symbol's size as before, and never less than the 44 points a touch target needs. Beside
+        // another button the width is what the bar gives it.
         let bounds = self.bounds
-        let widthIncrease = horizontalTouchTargetExpansion ?? bounds.width * (UX.addressBarButtonTouchTargetScale - 1) / 2
-        let heightIncrease = bounds.height * (UX.addressBarButtonTouchTargetScale - 1) / 2
+        let minimum = TouchTarget.hitFrame(for: bounds)
+        let widthIncrease = horizontalTouchTargetExpansion
+        ?? max(bounds.width * (UX.addressBarButtonTouchTargetScale - 1) / 2, (minimum.width - bounds.width) / 2)
+        let heightIncrease = max(
+            bounds.height * (UX.addressBarButtonTouchTargetScale - 1) / 2,
+            (minimum.height - bounds.height) / 2
+        )
         let hitFrame = bounds.insetBy(dx: -widthIncrease, dy: -heightIncrease)
         
         return hitFrame.contains(point)

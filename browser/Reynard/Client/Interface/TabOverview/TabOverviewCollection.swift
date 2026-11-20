@@ -444,6 +444,8 @@ final class TabOverviewCollection: NSObject {
                   !cell.isCloseButton(at: collectionView.convert(location, to: cell)) else { return }
             let targetOffset = CGPoint(x: cell.center.x - location.x, y: cell.center.y - location.y)
             cell.setReorderState(.lifted, animated: true)
+            // The card comes up off the grid: the same impact a favorite gives when it is picked up.
+            Haptics.rigid()
             let workItem = DispatchWorkItem { [weak self, weak collectionView, weak cell, weak gestureRecognizer] in
                 guard let self, let collectionView, let cell, let gestureRecognizer,
                       case .pending(let pendingCell, let targetOffset, _) = self.reorderState,

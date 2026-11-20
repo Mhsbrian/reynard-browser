@@ -49,6 +49,8 @@ final class TabOverview: UIView {
         static let bottomToolbarContainerHeight: CGFloat = 144
         static let sideBottomToolbarContentHeight: CGFloat = 56
         static let topToolbarContainerHeight: CGFloat = 76
+        /// The height the browser's own top toolbar asks the system for, so that both sit in the same row.
+        static let statusRowToolbarHeight: CGFloat = 60
         static let layoutAnimationDuration: TimeInterval = 0.22
     }
     
@@ -112,16 +114,18 @@ final class TabOverview: UIView {
     let collection: TabOverviewCollection
     let topToolbar = TabOverviewTopToolbar()
     let bottomToolbar = TabOverviewBottomToolbar()
-    private let statusBarBlurView: VariableBlurView = {
-        let view = VariableBlurView()
-        view.direction = .down
-        view.dimmingTintColor = nil
-        return view
-    }()
+    private let statusBarBlurView = FadingBackdropView(
+        direction: .down,
+        dimmingTintColor: nil,
+        solidColor: .systemGray6
+    )
     private(set) lazy var presentation = TabOverviewPresentation(tabOverview: self)
     
     private var regularTabsCollectionTopToContainerConstraint: NSLayoutConstraint!
     private var bottomToolbarHeightConstraint: NSLayoutConstraint!
+    private var topToolbarSafeAreaConstraints: [NSLayoutConstraint] = []
+    private var sharesStatusRow = false
+    private var topToolbarStatusRowConstraints: [NSLayoutConstraint] = []
     private var bottomToolbarSideTopConstraint: NSLayoutConstraint!
     private var verticalBarItemsStorage: AnyObject?
     private var regularTabsCollectionTopToToolbarConstraint: NSLayoutConstraint!
@@ -183,8 +187,16 @@ final class TabOverview: UIView {
     
     // MARK: - Updates
     
-    func applyLayout(toolbarPosition: ToolbarPosition, animated: Bool) {
+    /// - Parameter sharesStatusRow: On the inner display of an iPhone Duo the status items are in a row along
+    ///   the top, and the system gives a top bar the rest of that row. The overview's toolbar goes there, as
+    ///   the browser's own does, where it would otherwise leave the row empty and start under it.
+    ///   Left out, it stays as it was last set.
+    func applyLayout(toolbarPosition: ToolbarPosition, sharesStatusRow: Bool? = nil, animated: Bool) {
         self.toolbarPosition = toolbarPosition
+        if let sharesStatusRow {
+            self.sharesStatusRow = sharesStatusRow
+        }
+        setTopToolbarSharesStatusRow(self.sharesStatusRow && toolbarPosition == .top)
         let usesBottomToolbar = toolbarPosition != .top
         let showsBottomActions = toolbarPosition == .bottom
         topToolbar.isHidden = usesBottomToolbar
@@ -326,16 +338,18 @@ final class TabOverview: UIView {
         privateTabsCollectionTopToToolbarConstraint = collection.privateTabsCollectionView.topAnchor.constraint(equalTo: topToolbar.bottomAnchor)
         privateTabsCollectionBottomToContainerConstraint = collection.privateTabsCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
         privateTabsCollectionBottomToToolbarConstraint = collection.privateTabsCollectionView.bottomAnchor.constraint(equalTo: bottomToolbar.topAnchor)
+        topToolbarSafeAreaConstraints = [
+            topToolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            topToolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            topToolbar.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
+            topToolbar.heightAnchor.constraint(equalToConstant: UX.topToolbarContainerHeight),
+        ]
+        NSLayoutConstraint.activate(topToolbarSafeAreaConstraints)
         NSLayoutConstraint.activate([
             collection.regularTabsCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
             collection.regularTabsCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
             collection.privateTabsCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
             collection.privateTabsCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-            
-            topToolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            topToolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            topToolbar.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
-            topToolbar.heightAnchor.constraint(equalToConstant: UX.topToolbarContainerHeight),
             
             bottomToolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottomToolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -343,6 +357,27 @@ final class TabOverview: UIView {
             bottomToolbarHeightConstraint,
         ])
         
+    }
+    
+    private func setTopToolbarSharesStatusRow(_ sharesStatusRow: Bool) {
+        var sharesStatusRow = sharesStatusRow
+        if #available(iOS 27.1, *) {
+            if sharesStatusRow, topToolbarStatusRowConstraints.isEmpty {
+                let guide = layoutGuide(for: .bar(onEdge: UIRectEdge.top, extent: UX.statusRowToolbarHeight))
+                topToolbarStatusRowConstraints = [
+                    topToolbar.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+                    topToolbar.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+                    topToolbar.topAnchor.constraint(equalTo: guide.topAnchor),
+                    topToolbar.heightAnchor.constraint(equalTo: guide.heightAnchor),
+                ]
+            }
+        } else {
+            sharesStatusRow = false
+        }
+        
+        NSLayoutConstraint.deactivate(sharesStatusRow ? topToolbarSafeAreaConstraints : topToolbarStatusRowConstraints)
+        NSLayoutConstraint.activate(sharesStatusRow ? topToolbarStatusRowConstraints : topToolbarSafeAreaConstraints)
+        topToolbar.setSharesStatusRow(sharesStatusRow)
     }
     
     private func configureActions() {

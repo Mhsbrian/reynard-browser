@@ -30,9 +30,7 @@ final class FavoritesSectionViewController: UIViewController {
     
     weak var delegate: FavoritesSectionViewControllerDelegate?
     
-    private static let titleFont = UIFontMetrics(forTextStyle: .title2).scaledFont(
-        for: .systemFont(ofSize: UX.titleFontSize, weight: .bold)
-    )
+    private static let titleFont = HomepageTextMetrics.headingFont(ofSize: UX.titleFontSize)
     
     private let bookmarkStore: BookmarkStore
     private let folder: BookmarkFolderSnapshot?
@@ -62,6 +60,9 @@ final class FavoritesSectionViewController: UIViewController {
         label.textColor = .label
         label.text = NSLocalizedString("Favorites", comment: "")
         label.adjustsFontForContentSizeCategory = true
+        // A heading wraps before it is cut short, and is a heading to VoiceOver.
+        label.numberOfLines = 0
+        label.accessibilityTraits = .header
         return label
     }()
     

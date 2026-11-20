@@ -10,7 +10,6 @@ final class HistoryViewController: UIViewController, UITableViewDataSource, UITa
     private enum UX {
         static let estimatedRowHeight: CGFloat = 72
         static let sectionHeaderTopPadding: CGFloat = 0
-        static let groupedSectionHeaderHeight: CGFloat = 34
         static let headerClearButtonTrailingInset: CGFloat = 20
     }
     
@@ -530,7 +529,7 @@ final class HistoryViewController: UIViewController, UITableViewDataSource, UITa
     }
     
     func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return UX.groupedSectionHeaderHeight
+        return LibrarySharedUtils.groupedSectionHeaderHeight
     }
     
     // MARK: - UITableViewDelegate

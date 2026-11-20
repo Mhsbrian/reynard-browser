@@ -90,6 +90,7 @@ final class TabOverviewBottomToolbar: UIView {
         actionButtonStackView.distribution = .equalSpacing
         tabModeControl.translatesAutoresizingMaskIntoConstraints = false
         tabModeControl.selectedSegmentIndex = TabOverview.Mode.regularTabs.rawValue
+        tabModeControl.accessibilityIdentifier = AccessibilityIdentifier.TabOverview.mode
     }
     
     private func configureHierarchy() {
@@ -136,6 +137,10 @@ final class TabOverviewBottomToolbar: UIView {
         clearTabsItem.tintColor = .label
         addTabItem.tintColor = .label
         doneItem.tintColor = .label
+        // System items name themselves "Delete" and "Add"; these say what they do here.
+        TabOverviewToolbarButton.Action.clear.name(clearTabsItem)
+        TabOverviewToolbarButton.Action.add.name(addTabItem)
+        TabOverviewToolbarButton.Action.done.name(doneItem)
         toolbar.items = [
             clearTabsItem,
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),

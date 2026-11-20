@@ -9,11 +9,12 @@ import UIKit
 
 final class TopToolbar: UIView {
     private enum UX {
-        static let topToolbarContentHeight: CGFloat = 60
+        static let topToolbarBaseContentHeight: CGFloat = 60
         static let topToolbarButtonStackHeight: CGFloat = 30
         static let topToolbarStandardButtonStackWidth: CGFloat = 126
         static let topToolbarHorizontalInset: CGFloat = 12
-        static let topToolbarButtonSpacing: CGFloat = 10
+        // 30-point buttons 44 points apart, so that each one's touch target is its own.
+        static let topToolbarButtonSpacing: CGFloat = 14
         static let topToolbarAddressBarSpacing: CGFloat = 12
         static let topToolbarAddressBarVerticalSpacing: CGFloat = 8
         static let topToolbarAddressBarWidthLimit: CGFloat = 650
@@ -25,6 +26,11 @@ final class TopToolbar: UIView {
         case hidden
         case standard
         case compact
+    }
+    
+    /// The height of the toolbar's row. It holds the address bar, and grows with it when the text size does.
+    static var contentHeight: CGFloat {
+        return UX.topToolbarBaseContentHeight + BarMetrics.addressBarGrowth
     }
     
     /// Where the toolbar's content goes when something lies across its row: the fold of an iPhone Duo that is
@@ -55,6 +61,8 @@ final class TopToolbar: UIView {
     var onShare: (() -> Void)?
     var onNewTab: (() -> Void)?
     var onTabOverview: (() -> Void)?
+    /// Links dropped on the new tab button, to be opened in new tabs.
+    var onDropLinks: (([URL]) -> Void)?
     
     private let contentView: UIView = {
         let view = UIView()
@@ -129,7 +137,7 @@ final class TopToolbar: UIView {
     
     private lazy var leadingButtons: UIStackView = {
         downloadButton.isHidden = true
-        let stack = UIStackView(arrangedSubviews: [sidebarButton, downloadButton, backButton, forwardButton, libraryButton])
+        let stack = TouchTargetExtendingStackView(arrangedSubviews: [sidebarButton, downloadButton, backButton, forwardButton, libraryButton])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .horizontal
         stack.spacing = UX.topToolbarButtonSpacing
@@ -138,7 +146,7 @@ final class TopToolbar: UIView {
     }()
     
     private lazy var trailingButtons: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [shareButton, newTabButton, tabOverviewButton])
+        let stack = TouchTargetExtendingStackView(arrangedSubviews: [shareButton, newTabButton, tabOverviewButton])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .horizontal
         stack.spacing = UX.topToolbarButtonSpacing
@@ -173,6 +181,7 @@ final class TopToolbar: UIView {
     
     private var heightConstraint: NSLayoutConstraint!
     private var contentTopConstraint: NSLayoutConstraint!
+    private var contentHeightConstraint: NSLayoutConstraint!
     private var backgroundBottomConstraint: NSLayoutConstraint!
     private var leadingWidthConstraint: NSLayoutConstraint!
     private var trailingWidthConstraint: NSLayoutConstraint!
@@ -301,7 +310,8 @@ final class TopToolbar: UIView {
             NSLayoutConstraint.deactivate(keepsBackgroundInsideSafeArea ? backgroundEdgeConstraints : backgroundSafeAreaConstraints)
             NSLayoutConstraint.activate(keepsBackgroundInsideSafeArea ? backgroundSafeAreaConstraints : backgroundEdgeConstraints)
             contentTopConstraint.constant = topInset
-            heightConstraint.constant = topInset + UX.topToolbarContentHeight
+            heightConstraint.constant = topInset + Self.contentHeight
+            contentHeightConstraint.constant = Self.contentHeight
             isHidden = state == .hidden
             guard state != .hidden else { return }
             
@@ -400,15 +410,16 @@ final class TopToolbar: UIView {
     }
     
     func setMenuButtonIndicatesUpdate(_ hasUpdate: Bool) {
-        libraryButton.setImage(
-            hasUpdate ? UIImage(named: "reynard.ellipsis.circle.badge") : UIImage(named: "reynard.ellipsis.circle"),
-            for: .normal
-        )
+        libraryButton.setIndicatesUpdate(hasUpdate)
     }
     
     func syncSidebarButton(splitViewController: UISplitViewController?) {
         sidebarButton.setImage(splitViewController?.displayModeButtonItem.image ?? UIImage(named: "reynard.sidebar.left"), for: .normal)
-        sidebarButton.accessibilityLabel = splitViewController?.displayModeButtonItem.accessibilityLabel
+        // The system names its own button for the state the sidebar is in; where it has no name, ours stands.
+        if let label = splitViewController?.displayModeButtonItem.accessibilityLabel, !label.isEmpty {
+            sidebarButton.accessibilityLabel = label
+            sidebarButton.largeContentTitle = label
+        }
     }
     
     func sidebarButtonFrame(in view: UIView) -> CGRect {
@@ -439,6 +450,11 @@ final class TopToolbar: UIView {
     }
     
     private func configureHierarchy() {
+        LinkDropHandler(acceptsText: false) { [weak self] content in
+            if case let .links(urls) = content {
+                self?.onDropLinks?(urls)
+            }
+        }.install(on: newTabButton)
         addLayoutGuide(barContentGuide)
         addSubview(backgroundView)
         addSubview(backgroundBottomBorderView)
@@ -448,8 +464,9 @@ final class TopToolbar: UIView {
     }
     
     private func configureConstraints() {
-        heightConstraint = heightAnchor.constraint(equalToConstant: UX.topToolbarContentHeight)
+        heightConstraint = heightAnchor.constraint(equalToConstant: Self.contentHeight)
         contentTopConstraint = contentView.topAnchor.constraint(equalTo: topAnchor)
+        contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: Self.contentHeight)
         backgroundBottomConstraint = backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor)
         leadingWidthConstraint = leadingButtons.widthAnchor.constraint(equalToConstant: UX.topToolbarStandardButtonStackWidth)
         trailingWidthConstraint = trailingButtons.widthAnchor.constraint(equalToConstant: UX.topToolbarStandardButtonStackWidth)
@@ -491,7 +508,7 @@ final class TopToolbar: UIView {
             contentTopConstraint,
             contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            contentView.heightAnchor.constraint(equalToConstant: UX.topToolbarContentHeight),
+            contentHeightConstraint,
             
             leadingButtonsLeadingConstraint,
             leadingButtons.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -583,7 +600,7 @@ final class TopToolbar: UIView {
             x: 0,
             y: contentTopConstraint.constant,
             width: width,
-            height: UX.topToolbarContentHeight
+            height: Self.contentHeight
         )
         var obstacleFrames: [CGRect] = []
         if let fold = verticalDisplayFold(crossing: row), fold.isActive {
@@ -693,7 +710,7 @@ final class TopToolbar: UIView {
     /// iPhone Duo it lies in the status items' row and ends where they begin.
     @available(iOS 27.1, *)
     private var statusRowGuide: UILayoutGuide {
-        return layoutGuide(for: .bar(onEdge: UIRectEdge.top, extent: UX.topToolbarContentHeight))
+        return layoutGuide(for: .bar(onEdge: UIRectEdge.top, extent: Self.contentHeight))
     }
     
     /// How far below this view's top edge that region starts.
@@ -701,7 +718,7 @@ final class TopToolbar: UIView {
         guard #available(iOS 27.1, *) else {
             return nil
         }
-        return edgeInsets(for: .bar(onEdge: UIRectEdge.top, extent: UX.topToolbarContentHeight)).top
+        return edgeInsets(for: .bar(onEdge: UIRectEdge.top, extent: Self.contentHeight)).top
     }
     
     private func setSharesStatusRow(_ sharesStatusRow: Bool) {

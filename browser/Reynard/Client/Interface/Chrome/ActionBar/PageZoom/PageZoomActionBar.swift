@@ -9,18 +9,23 @@ import UIKit
 
 final class PageZoomActionBar: UIView {
     private enum UX {
+        // The percentage follows the text size. The pill grows with it: higher, and wider in the middle.
         static var controlsHeight: CGFloat {
-            if #available(iOS 26.0, *) { return 48 }
-            return 38
+            let growth = BarMetrics.growth(forTextOfSize: percentFontSize)
+            if #available(iOS 26.0, *) { return 48 + growth }
+            return 38 + growth
         }
         static var controlsWidth: CGFloat {
-            if #available(iOS 26.0, *) { return 222 }
-            return 184
+            let middleGrowth = BarMetrics.scaled(percentWidth) - percentWidth
+            if #available(iOS 26.0, *) { return 222 + middleGrowth }
+            return 184 + middleGrowth
         }
         static var controlButtonWidth: CGFloat {
-            if #available(iOS 26.0, *) { return (controlsWidth - separatorWidth * 2) / 3 }
+            if #available(iOS 26.0, *) { return (222 - separatorWidth * 2) / 3 }
             return 55
         }
+        /// The room "100%" takes at the default text size.
+        static let percentWidth: CGFloat = 44
         static let separatorWidth: CGFloat = 1
         static var controlsCornerRadius: CGFloat { return controlsHeight / 2 }
         static let percentFontSize: CGFloat = 16
@@ -77,18 +82,34 @@ final class PageZoomActionBar: UIView {
         view.layer.cornerCurve = .continuous
         view.layer.cornerRadius = UX.controlsCornerRadius
         view.layer.borderWidth = UX.borderWidth
-        view.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        view.layer.borderColor = AccessibilityAppearance.hairlineColor.cgColor
         view.clipsToBounds = true
         return view
     }()
     
-    private lazy var zoomOutButton = makeControlButton(named: "reynard.minus", action: #selector(zoomOutTapped))
-    private lazy var zoomInButton = makeControlButton(named: "reynard.plus", action: #selector(zoomInTapped))
+    private lazy var zoomOutButton = makeControlButton(
+        named: "reynard.minus",
+        title: NSLocalizedString("Zoom Out", comment: ""),
+        identifier: AccessibilityIdentifier.PageZoom.zoomOut,
+        action: #selector(zoomOutTapped)
+    )
+    private lazy var zoomInButton = makeControlButton(
+        named: "reynard.plus",
+        title: NSLocalizedString("Zoom In", comment: ""),
+        identifier: AccessibilityIdentifier.PageZoom.zoomIn,
+        action: #selector(zoomInTapped)
+    )
+    private var controlsSizeConstraints: [NSLayoutConstraint] = []
     
     private lazy var resetButton: UIButton = {
         let button = UIButton(type: .system)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.titleLabel?.font = UIFont.systemFont(ofSize: UX.percentFontSize, weight: .regular)
+        button.titleLabel?.font = BarMetrics.font(ofSize: UX.percentFontSize)
+        button.titleLabel?.adjustsFontForContentSizeCategory = true
+        // Read as what it is and what it does, with the percentage as its value: see `setZoomLevel(_:)`.
+        button.accessibilityLabel = NSLocalizedString("Page Zoom", comment: "")
+        button.accessibilityHint = NSLocalizedString("Reset", comment: "")
+        button.accessibilityIdentifier = AccessibilityIdentifier.PageZoom.reset
         button.setTitleColor(.secondaryLabel, for: .normal)
         button.addTarget(self, action: #selector(resetTapped), for: .touchUpInside)
         return button
@@ -109,6 +130,21 @@ final class PageZoomActionBar: UIView {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory else {
+            return
+        }
+        
+        controlsSizeConstraints[0].constant = UX.controlsWidth
+        controlsSizeConstraints[1].constant = UX.controlsHeight
+        if #unavailable(iOS 26.0) {
+            controlsShadowView.layer.cornerRadius = UX.controlsCornerRadius
+            controlsBackground.layer.cornerRadius = UX.controlsCornerRadius
+        }
+        setNeedsLayout()
     }
     
     override func layoutSubviews() {
@@ -139,6 +175,7 @@ final class PageZoomActionBar: UIView {
     func setZoomLevel(_ level: Int) {
         zoomLevel = PageZoomActionBar.zoomLevels.contains(level) ? level : Prefs.BrowsingSettings.defaultPageZoomLevel
         resetButton.setTitle(PageZoomLevels.displayText(for: zoomLevel), for: .normal)
+        resetButton.accessibilityValue = PageZoomLevels.displayText(for: zoomLevel)
         zoomOutButton.isEnabled = zoomLevel > PageZoomActionBar.zoomLevels.first!
         zoomInButton.isEnabled = zoomLevel < PageZoomActionBar.zoomLevels.last!
         zoomOutButton.alpha = zoomOutButton.isEnabled ? 1 : UX.disabledAlpha
@@ -161,17 +198,21 @@ final class PageZoomActionBar: UIView {
     
     // MARK: - Actions
     
+    // Each step of zoom is a value changing, which is what the selection haptic is for.
     @objc private func zoomOutTapped() {
+        Haptics.selection()
         animatePillTap()
         onZoomOut?()
     }
     
     @objc private func zoomInTapped() {
+        Haptics.selection()
         animatePillTap()
         onZoomIn?()
     }
     
     @objc private func resetTapped() {
+        Haptics.selection()
         animatePillTap()
         onReset?()
     }
@@ -203,6 +244,7 @@ final class PageZoomActionBar: UIView {
     private func configureAppearance() {
         translatesAutoresizingMaskIntoConstraints = false
         backgroundColor = .clear
+        accessibilityIdentifier = AccessibilityIdentifier.PageZoom.bar
         if #available(iOS 26.0, *) {
             backgroundView.isHidden = true
             setModernContentHidden(false)
@@ -225,6 +267,10 @@ final class PageZoomActionBar: UIView {
     }
     
     private func configureConstraints() {
+        controlsSizeConstraints = [
+            controlsShadowView.widthAnchor.constraint(equalToConstant: UX.controlsWidth),
+            controlsShadowView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
+        ]
         NSLayoutConstraint.activate([
             backgroundView.topAnchor.constraint(equalTo: topAnchor),
             backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -233,8 +279,8 @@ final class PageZoomActionBar: UIView {
             
             controlsShadowView.centerXAnchor.constraint(equalTo: centerXAnchor),
             controlsShadowView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            controlsShadowView.widthAnchor.constraint(equalToConstant: UX.controlsWidth),
-            controlsShadowView.heightAnchor.constraint(equalToConstant: UX.controlsHeight),
+            controlsSizeConstraints[0],
+            controlsSizeConstraints[1],
             
             controlsBackground.topAnchor.constraint(equalTo: controlsShadowView.topAnchor),
             controlsBackground.leadingAnchor.constraint(equalTo: controlsShadowView.leadingAnchor),
@@ -269,8 +315,11 @@ final class PageZoomActionBar: UIView {
         ])
     }
     
-    private func makeControlButton(named: String, action: Selector) -> UIButton {
+    private func makeControlButton(named: String, title: String, identifier: String, action: Selector) -> UIButton {
         let button = UIButton(type: .system)
+        button.accessibilityLabel = title
+        button.accessibilityIdentifier = identifier
+        button.enableLargeContentViewer(title: title, image: UIImage(named: named))
         button.translatesAutoresizingMaskIntoConstraints = false
         let configuration = UIImage.SymbolConfiguration(pointSize: UX.controlSymbolPointSize, weight: .regular)
         button.setImage(UIImage(named: named, in: .main, with: configuration), for: .normal)

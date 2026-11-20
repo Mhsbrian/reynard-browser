@@ -27,6 +27,7 @@ final class TabOverviewVerticalBarItems {
         )
         item.visibilityPriority = .low
         item.tintColor = .label
+        item.accessibilityIdentifier = AccessibilityIdentifier.TabOverview.closeTabs
         return item
     }()
     
@@ -40,6 +41,7 @@ final class TabOverviewVerticalBarItems {
         )
         item.visibilityPriority = .standard
         item.tintColor = .label
+        item.accessibilityIdentifier = AccessibilityIdentifier.TabOverview.newTab
         return item
     }()
     
@@ -49,6 +51,7 @@ final class TabOverviewVerticalBarItems {
             primaryAction: UIAction { [weak self] _ in self?.onDone?() }
         )
         item.visibilityPriority = .high
+        item.accessibilityIdentifier = AccessibilityIdentifier.TabOverview.done
         return item
     }()
     

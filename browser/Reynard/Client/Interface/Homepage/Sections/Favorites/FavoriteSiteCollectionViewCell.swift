@@ -32,9 +32,12 @@ final class FavoriteSiteCollectionViewCell: UICollectionViewCell {
         return iconBackgroundView
     }
     
-    private static let titleFont = UIFontMetrics(forTextStyle: .caption1).scaledFont(
-        for: .systemFont(ofSize: UX.titleFontSize, weight: .semibold)
-    )
+    private static let titleFont = HomepageTextMetrics.tileTitleFont(weight: .semibold)
+    
+    /// The room the tile's name takes under its icon at the text size in use.
+    static var titleHeight: CGFloat {
+        return HomepageTextMetrics.tileTitleHeight(weight: .semibold, minimum: UX.titleHeight)
+    }
     
     private let shadowView: UIView = {
         let view = UIView()
@@ -77,6 +80,7 @@ final class FavoriteSiteCollectionViewCell: UICollectionViewCell {
     private var shadowWidthConstraint: NSLayoutConstraint?
     private var shadowHeightConstraint: NSLayoutConstraint?
     private var shadowTopConstraint: NSLayoutConstraint?
+    private var titleHeightConstraint: NSLayoutConstraint!
     private(set) var reorderState: ReorderState = .resting
     
     // MARK: - Lifecycle
@@ -104,9 +108,17 @@ final class FavoriteSiteCollectionViewCell: UICollectionViewCell {
     }
     
     func configure(favorite: BookmarkSnapshot, titleColor: UIColor) {
-        titleLabel.text = favorite.title
+        HomepageTextMetrics.setTileTitle(favorite.title, on: titleLabel)
         titleLabel.textColor = titleColor
         iconView.configure(bookmark: favorite)
+        
+        // One element named for the site. The name under the icon stops growing early, so the tile shows it
+        // in the Large Content Viewer at the accessibility text sizes.
+        isAccessibilityElement = true
+        accessibilityLabel = favorite.title
+        accessibilityTraits = .button
+        accessibilityIdentifier = AccessibilityIdentifier.Homepage.favorite
+        enableLargeContentViewer(title: favorite.title)
     }
     
     func setReorderState(_ state: ReorderState, animated: Bool) {
@@ -142,6 +154,7 @@ final class FavoriteSiteCollectionViewCell: UICollectionViewCell {
         self.shadowWidthConstraint = shadowWidthConstraint
         self.shadowHeightConstraint = shadowHeightConstraint
         self.shadowTopConstraint = shadowTopConstraint
+        titleHeightConstraint = titleLabel.heightAnchor.constraint(equalToConstant: Self.titleHeight)
         
         NSLayoutConstraint.activate([
             shadowTopConstraint,
@@ -159,10 +172,10 @@ final class FavoriteSiteCollectionViewCell: UICollectionViewCell {
             iconView.topAnchor.constraint(equalTo: iconBackgroundView.topAnchor),
             iconView.bottomAnchor.constraint(equalTo: iconBackgroundView.bottomAnchor),
             
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: -HomepageTextMetrics.tileTitleOutset),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: HomepageTextMetrics.tileTitleOutset),
             titleLabel.topAnchor.constraint(equalTo: shadowView.bottomAnchor),
-            titleLabel.heightAnchor.constraint(equalToConstant: UX.titleHeight),
+            titleHeightConstraint,
         ])
     }
     

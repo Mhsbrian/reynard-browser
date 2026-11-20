@@ -626,6 +626,12 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
         browserChrome.onNewTab = { [weak self] in
             self?.createNewTab()
         }
+        browserChrome.onDropLinks = { [weak self] urls in
+            // The first link is shown; the rest open behind it.
+            for (index, url) in urls.enumerated() {
+                self?.openURLFromHomepage(url, disposition: index == 0 ? .newTab : .backgroundTab)
+            }
+        }
         browserChrome.onTabOverview = { [weak self] in
             self?.setTabOverviewVisible(true, animated: true)
         }
@@ -1090,6 +1096,7 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
     private func applyTabOverviewLayout() {
         tabOverview.applyLayout(
             toolbarPosition: browserLayout.tabOverviewToolbarPosition,
+            sharesStatusRow: topToolbarSharesStatusRow,
             animated: false
         )
     }
@@ -1494,6 +1501,24 @@ final class BrowserViewController: UIViewController, GeckoScreenOrientationDeleg
             name: .newTabDisplayOptionDidChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textSizeDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
+    }
+    
+    /// The bars are as high as their text needs, so a new text size is a new layout.
+    @objc private func textSizeDidChange() {
+        guard isViewLoaded else {
+            return
+        }
+        
+        tabBar.textSizeDidChange()
+        updateBrowserLayout(animated: false)
+        tabOverview.invalidateCollectionLayouts()
+        view.setNeedsLayout()
     }
     
     @objc private func newTabDisplayOptionDidChange() {

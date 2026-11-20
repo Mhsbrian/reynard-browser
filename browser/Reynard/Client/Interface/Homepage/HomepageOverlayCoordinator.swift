@@ -76,6 +76,14 @@ final class HomepageOverlayCoordinator {
         let showsHomepage = delegate?.homepageSelectedTab.map(isHomepageTab) == true
         delegate?.homepageContentView.setWebVisibility(showsHomepage ? .hidden : .visible)
         
+        // A page has been opened, in a regular tab: the welcome has done what it is for. It is not shown again.
+        if !showsHomepage,
+           let tab = delegate?.homepageSelectedTab,
+           tab.url != nil,
+           !Prefs.HomepageSettings.hasSeenWelcome {
+            Prefs.HomepageSettings.hasSeenWelcome = true
+        }
+        
         guard let presentation = homepagePresentation else {
             dismiss(animated: animated)
             return

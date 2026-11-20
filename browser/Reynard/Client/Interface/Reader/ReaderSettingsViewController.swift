@@ -24,6 +24,8 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
         static let hideReaderFontSize: CGFloat = 16
         static let hideReaderSymbolSize: CGFloat = 16
         static let fontPillHeight: CGFloat = 28
+        // The panel is 360 points wide whatever the text size, so its text grows by half and no further.
+        static let maximumTextScale: CGFloat = 1.5
         static let fontSize: CGFloat = 17
         static let titleSize: CGFloat = 19
         static let symbolSize: CGFloat = 20
@@ -231,7 +233,14 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
         
         let title = UILabel()
         title.text = NSLocalizedString("Reader", comment: "")
-        title.font = .systemFont(ofSize: UX.titleSize, weight: .semibold)
+        title.font = .scaledSystemFont(
+            ofSize: UX.titleSize,
+            weight: .semibold,
+            relativeTo: .headline,
+            maximumPointSize: UX.titleSize * UX.maximumTextScale
+        )
+        title.adjustsFontForContentSizeCategory = true
+        title.accessibilityTraits = .header
         configureFontButton()
         
         let header = UIStackView(arrangedSubviews: [title, fontButton])
@@ -256,7 +265,7 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
         fontButton.backgroundColor = .tertiarySystemFill
         fontButton.layer.cornerRadius = UX.fontPillHeight / 2
         fontButton.contentEdgeInsets = UIEdgeInsets(top: 0, left: UX.padding, bottom: 0, right: UX.padding)
-        fontButton.heightAnchor.constraint(equalToConstant: UX.fontPillHeight).isActive = true
+        fontButton.heightAnchor.constraint(greaterThanOrEqualToConstant: UX.fontPillHeight).isActive = true
         fontButton.setContentHuggingPriority(.required, for: .horizontal)
         if #available(iOS 14.0, *) {
             fontButton.showsMenuAsPrimaryAction = true
@@ -292,7 +301,11 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
     private func makeHideReaderButton() -> UIButton {
         let hide = makeButton(image: "reynard.text.page.slash.fill", label: NSLocalizedString("Hide Reader", comment: ""), action: #selector(hideReader))
         hide.setTitle(" " + NSLocalizedString("Hide Reader", comment: ""), for: .normal)
-        hide.titleLabel?.font = .systemFont(ofSize: UX.hideReaderFontSize, weight: .regular)
+        hide.titleLabel?.font = .scaledSystemFont(
+            ofSize: UX.hideReaderFontSize,
+            maximumPointSize: UX.hideReaderFontSize * UX.maximumTextScale
+        )
+        hide.titleLabel?.adjustsFontForContentSizeCategory = true
         hide.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: UX.hideReaderSymbolSize, weight: .regular), forImageIn: .normal)
         hide.tintColor = .white
         hide.setTitleColor(.white, for: .normal)
@@ -317,6 +330,9 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
             button.layer.borderWidth = UX.borderWidth
             button.layer.borderColor = colors.foreground.withAlphaComponent(0.18).cgColor
             button.addTarget(self, action: #selector(themeSelected(_:)), for: .touchUpInside)
+            // The name is a label inside the button, which VoiceOver does not read as the button's own.
+            button.accessibilityLabel = title(for: colorScheme)
+            button.accessibilityIdentifier = AccessibilityIdentifier.Reader.theme
             
             let check = UIImageView(image: UIImage(named: "reynard.checkmark"))
             check.tintColor = colors.foreground
@@ -324,7 +340,8 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
             
             let label = UILabel()
             label.text = title(for: colorScheme)
-            label.font = .systemFont(ofSize: UX.fontSize)
+            label.font = .scaledSystemFont(ofSize: UX.fontSize, maximumPointSize: UX.fontSize * UX.maximumTextScale)
+            label.adjustsFontForContentSizeCategory = true
             label.textColor = colors.foreground
             
             let contents = UIStackView(arrangedSubviews: [check, label])
@@ -471,7 +488,8 @@ final class ReaderSettingsViewController: UIViewController, UIPopoverPresentatio
     
     private func font(for type: ReaderViewFontType) -> UIFont {
         let descriptor = UIFont.systemFont(ofSize: UX.fontSize).fontDescriptor
-        return UIFont(descriptor: descriptor.withDesign(type == .serif ? .serif : .default) ?? descriptor, size: UX.fontSize)
+        let font = UIFont(descriptor: descriptor.withDesign(type == .serif ? .serif : .default) ?? descriptor, size: UX.fontSize)
+        return UIFontMetrics(forTextStyle: .body).scaledFont(for: font, maximumPointSize: UX.fontSize * UX.maximumTextScale)
     }
     
     private func refreshAppearance() {

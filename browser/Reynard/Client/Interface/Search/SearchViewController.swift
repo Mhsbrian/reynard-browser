@@ -18,7 +18,7 @@ final class SearchViewController: UIViewController, UITableViewDataSource, UITab
         static let limitedCompletionCountWithUserData = 4
         static let tableInset: CGFloat = 8
         static let estimatedRowHeight: CGFloat = 60
-        static let sectionHeaderHeight: CGFloat = 34
+        static let baseSectionHeaderHeight: CGFloat = 34
         static let bestMatchHeaderHeight: CGFloat = 8
         static let headerLabelLeading: CGFloat = 24
         static let headerLabelTrailing: CGFloat = 16
@@ -280,11 +280,11 @@ final class SearchViewController: UIViewController, UITableViewDataSource, UITab
         case .topDomainCompletions:
             return .leastNormalMagnitude
         case .typedQuery:
-            return hasQuery ? UX.sectionHeaderHeight : .leastNormalMagnitude
+            return hasQuery ? Self.sectionHeaderHeight : .leastNormalMagnitude
         case .completions:
             return .leastNormalMagnitude
         case .userDataResults:
-            return showsUserDataResults ? UX.sectionHeaderHeight : .leastNormalMagnitude
+            return showsUserDataResults ? Self.sectionHeaderHeight : .leastNormalMagnitude
         }
     }
     
@@ -382,13 +382,26 @@ final class SearchViewController: UIViewController, UITableViewDataSource, UITab
         ])
     }
     
+    private static var sectionHeaderFont: UIFont {
+        return .scaledSystemFont(ofSize: UX.sectionHeaderFontSize, weight: .semibold, relativeTo: .subheadline)
+    }
+    
+    /// A section header is as high as its text needs: 34 points at the default text size.
+    private static var sectionHeaderHeight: CGFloat {
+        let base = UIFont.systemFont(ofSize: UX.sectionHeaderFontSize, weight: .semibold)
+        let growth = max(0, (sectionHeaderFont.lineHeight - base.lineHeight - 0.01).rounded(.up))
+        return UX.baseSectionHeaderHeight + growth
+    }
+    
     private func makeSectionHeaderView(title: String) -> UIView {
         let container = UIView()
         container.backgroundColor = .clear
         
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: UX.sectionHeaderFontSize, weight: .semibold)
+        label.font = Self.sectionHeaderFont
+        label.adjustsFontForContentSizeCategory = true
+        label.accessibilityTraits = .header
         label.textColor = .secondaryLabel
         label.text = title
         

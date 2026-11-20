@@ -36,19 +36,22 @@ final class VerticalBarItems {
     private lazy var backItem = makeItem(
         title: NSLocalizedString("Back", comment: ""),
         symbol: "reynard.chevron.backward",
-        priority: .high
+        priority: .high,
+        identifier: AccessibilityIdentifier.Toolbar.back
     ) { [weak self] in self?.onBack?() }
 
     private lazy var forwardItem = makeItem(
         title: NSLocalizedString("Forward", comment: ""),
         symbol: "reynard.chevron.forward",
-        priority: .low
+        priority: .low,
+        identifier: AccessibilityIdentifier.Toolbar.forward
     ) { [weak self] in self?.onForward?() }
 
     private lazy var shareItem = makeItem(
         title: NSLocalizedString("Share", comment: ""),
         symbol: "reynard.square.and.arrow.up",
-        priority: .standard
+        priority: .standard,
+        identifier: AccessibilityIdentifier.Toolbar.share
     ) { [weak self] in self?.onShare?() }
 
     // The library opens on its bookmarks, and says so. Not an ellipsis: in a system bar that symbol is the
@@ -57,19 +60,22 @@ final class VerticalBarItems {
         title: NSLocalizedString("Bookmarks", comment: ""),
         symbol: "reynard.book",
         priority: .high,
+        identifier: AccessibilityIdentifier.Toolbar.library,
         keepsActionInMenus: true
     ) { [weak self] in self?.onLibrary?() }
 
     private lazy var downloadsItem = makeItem(
         title: NSLocalizedString("Downloads", comment: ""),
         symbol: "reynard.arrow.down.circle",
-        priority: .low
+        priority: .low,
+        identifier: AccessibilityIdentifier.Toolbar.downloads
     ) { [weak self] in self?.onDownloads?() }
 
     private lazy var newTabItem = makeItem(
         title: NSLocalizedString("New Tab", comment: ""),
         symbol: "reynard.plus",
         priority: .standard,
+        identifier: AccessibilityIdentifier.Toolbar.newTab,
         keepsActionInMenus: true
     ) { [weak self] in self?.onNewTab?() }
 
@@ -77,6 +83,7 @@ final class VerticalBarItems {
         title: NSLocalizedString("Tabs", comment: ""),
         symbol: "reynard.square.on.square",
         priority: .high,
+        identifier: AccessibilityIdentifier.Toolbar.tabOverview,
         keepsActionInMenus: true
     ) { [weak self] in self?.onTabOverview?() }
 
@@ -119,6 +126,7 @@ final class VerticalBarItems {
 
     func setMenuButtonIndicatesUpdate(_ hasUpdate: Bool) {
         libraryItem.badge = hasUpdate ? .indicator() : nil
+        libraryItem.accessibilityValue = hasUpdate ? NSLocalizedString("Update Available", comment: "") : nil
     }
 
     // MARK: - Menus
@@ -243,6 +251,7 @@ final class VerticalBarItems {
         title: String,
         symbol: String,
         priority: UIBarButtonItemVisibilityPriority,
+        identifier: String,
         keepsActionInMenus: Bool = false,
         action: @escaping () -> Void
     ) -> UIBarButtonItem {
@@ -257,6 +266,7 @@ final class VerticalBarItems {
         }
         item.visibilityPriority = priority
         item.tintColor = .label
+        item.accessibilityIdentifier = identifier
         return item
     }
 }

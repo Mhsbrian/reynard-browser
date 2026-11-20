@@ -12,7 +12,6 @@ final class DownloadsViewController: UIViewController, UITableViewDataSource, UI
     private enum UX {
         static let estimatedRowHeight: CGFloat = 96
         static let sectionHeaderTopPadding: CGFloat = 0
-        static let groupedSectionHeaderHeight: CGFloat = 34
         static let headerMenuButtonTrailingInset: CGFloat = 20
     }
     
@@ -209,6 +208,7 @@ final class DownloadsViewController: UIViewController, UITableViewDataSource, UI
         } else {
             headerView.addSubview(downloadsMenuButton)
             downloadsMenuButton.translatesAutoresizingMaskIntoConstraints = false
+            downloadsMenuButton.accessibilityLabel = NSLocalizedString("More", comment: "The button that opens a menu of further actions")
             
             if #available(iOS 14.0, *) {
                 downloadsMenuButton.menu = makeDownloadsMenu()
@@ -299,6 +299,13 @@ final class DownloadsViewController: UIViewController, UITableViewDataSource, UI
         present(navigationController, animated: true)
     }
     
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.hasVerticalBars != traitCollection.hasVerticalBars, isViewLoaded {
+            installDownloadsNavigationMenuIfNeeded()
+        }
+    }
+    
     private func installDownloadsNavigationMenuIfNeeded() {
         guard showsNavigationMenu,
               let navigationItem = navigationController?.topViewController?.navigationItem else {
@@ -306,6 +313,12 @@ final class DownloadsViewController: UIViewController, UITableViewDataSource, UI
         }
         
         downloadsMenuItem.tintColor = .label
+        // In a bar the system has stood on its side an ellipsis is the system's own overflow menu. This menu
+        // is about the folder the downloads are in, and shows a folder there.
+        downloadsMenuItem.image = UIImage(named: traitCollection.hasVerticalBars ? "reynard.folder" : "reynard.ellipsis")
+        let name = NSLocalizedString("More", comment: "The button that opens a menu of further actions")
+        downloadsMenuItem.accessibilityLabel = name
+        downloadsMenuItem.title = name
         if #available(iOS 14.0, *) {
             downloadsMenuItem.menu = makeDownloadsMenu()
             downloadsMenuItem.target = nil
@@ -438,7 +451,7 @@ final class DownloadsViewController: UIViewController, UITableViewDataSource, UI
     }
     
     func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return UX.groupedSectionHeaderHeight
+        return LibrarySharedUtils.groupedSectionHeaderHeight
     }
     
     // MARK: - UITableViewDelegate

@@ -33,7 +33,7 @@ final class TabOverviewCard: UICollectionViewCell {
         static let faviconSideLength: CGFloat = 16
         static let faviconCornerRadius: CGFloat = 3
         static let tabTitleMaximumWidthAdjustment: CGFloat = -24
-        static let tabTitleFontSize: CGFloat = 14
+        static let tabTitleFontSize: CGFloat = BarMetrics.tabBarTextSize
         static let reorderLiftAnimationDuration: TimeInterval = 0.18
         static let swipeDismissMaximumFade: CGFloat = 0.35
         static let borderWidth: CGFloat = 0.5
@@ -51,9 +51,21 @@ final class TabOverviewCard: UICollectionViewCell {
     
     static let reuseIdentifier = "TabOverviewCard"
     
+    /// The height of the row under a card's picture, with the space above it: the tab's title at the text size
+    /// in use. The collection's layout sizes its cards with this.
+    static var metadataHeight: CGFloat {
+        return UX.tabMetadataTopSpacing + metadataRowHeight
+    }
+    
+    private static var metadataRowHeight: CGFloat {
+        return UX.tabMetadataHeight + BarMetrics.growth(forTextOfSize: UX.tabTitleFontSize)
+    }
+    
     var onClose: (() -> Void)?
     private(set) var tabID: UUID?
     
+    private var tabMetadataHeightConstraint: NSLayoutConstraint!
+    private var faviconSizeConstraints: [NSLayoutConstraint] = []
     private static let fallbackFaviconImage = UIImage(named: "reynard.globe")
     private(set) var reorderState: ReorderState = .resting
     private(set) var previewImage: UIImage?
@@ -116,13 +128,16 @@ final class TabOverviewCard: UICollectionViewCell {
         button.tintColor = .white
         button.layer.cornerRadius = UX.closeButtonCornerRadius
         button.layer.cornerCurve = .continuous
+        button.accessibilityLabel = NSLocalizedString("Close Tab", comment: "")
+        button.accessibilityIdentifier = AccessibilityIdentifier.TabOverview.closeTab
         return button
     }()
     
     private let tabTitleLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = UIFont.systemFont(ofSize: UX.tabTitleFontSize, weight: .medium)
+        label.font = BarMetrics.font(ofSize: UX.tabTitleFontSize, weight: .medium)
+        label.adjustsFontForContentSizeCategory = true
         label.textAlignment = .center
         label.textColor = .label
         label.numberOfLines = 1
@@ -205,6 +220,11 @@ final class TabOverviewCard: UICollectionViewCell {
             cropRect: visiblePreviewCropRect
         )
         faviconImageView.image = tab.favicon ?? Self.fallbackFaviconImage
+        
+        isAccessibilityElement = true
+        accessibilityLabel = tabTitleLabel.text
+        accessibilityTraits = .button
+        accessibilityIdentifier = AccessibilityIdentifier.TabOverview.card
     }
     
     private func visiblePreviewImage(
@@ -367,6 +387,12 @@ final class TabOverviewCard: UICollectionViewCell {
         webpagePreviewTrailingConstraint = webpagePreviewClippingView.trailingAnchor.constraint(equalTo: webpagePreviewRegionView.trailingAnchor)
         webpagePreviewBottomConstraint = webpagePreviewClippingView.bottomAnchor.constraint(equalTo: webpagePreviewRegionView.bottomAnchor)
         
+        tabMetadataHeightConstraint = tabMetadataContainerView.heightAnchor.constraint(equalToConstant: Self.metadataRowHeight)
+        faviconSizeConstraints = [
+            faviconImageView.widthAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.faviconSideLength)),
+            faviconImageView.heightAnchor.constraint(equalToConstant: BarMetrics.scaled(UX.faviconSideLength)),
+        ]
+        
         NSLayoutConstraint.activate([
             webpagePreviewRegionView.topAnchor.constraint(equalTo: contentView.topAnchor),
             webpagePreviewRegionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -390,14 +416,14 @@ final class TabOverviewCard: UICollectionViewCell {
             tabMetadataContainerView.topAnchor.constraint(equalTo: webpagePreviewRegionView.bottomAnchor, constant: UX.tabMetadataTopSpacing),
             tabMetadataContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: UX.tabMetadataHorizontalInset),
             tabMetadataContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -UX.tabMetadataHorizontalInset),
-            tabMetadataContainerView.heightAnchor.constraint(equalToConstant: UX.tabMetadataHeight),
+            tabMetadataHeightConstraint,
             tabMetadataContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             tabMetadataStackView.centerXAnchor.constraint(equalTo: tabMetadataContainerView.centerXAnchor),
             tabMetadataStackView.leadingAnchor.constraint(greaterThanOrEqualTo: tabMetadataContainerView.leadingAnchor),
             tabMetadataStackView.trailingAnchor.constraint(lessThanOrEqualTo: tabMetadataContainerView.trailingAnchor),
             tabMetadataStackView.centerYAnchor.constraint(equalTo: tabMetadataContainerView.centerYAnchor),
-            faviconImageView.widthAnchor.constraint(equalToConstant: UX.faviconSideLength),
-            faviconImageView.heightAnchor.constraint(equalToConstant: UX.faviconSideLength),
+            faviconSizeConstraints[0],
+            faviconSizeConstraints[1],
             tabTitleLabel.widthAnchor.constraint(
                 lessThanOrEqualTo: tabMetadataContainerView.widthAnchor,
                 constant: UX.tabTitleMaximumWidthAdjustment
@@ -456,5 +482,40 @@ final class TabOverviewCard: UICollectionViewCell {
     
     @objc private func closeTabButtonTapped() {
         onClose?()
+    }
+    
+    // MARK: - Accessibility And Text Size
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            applyTextSize()
+        }
+    }
+    
+    private func applyTextSize() {
+        tabMetadataHeightConstraint.constant = Self.metadataRowHeight
+        faviconSizeConstraints.forEach { $0.constant = BarMetrics.scaled(UX.faviconSideLength) }
+    }
+    
+    // A card is one element, named by its tab, with closing as an action. VoiceOver would otherwise stop at
+    // a close button and a title on every card, with nothing to say which button closes which tab.
+    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            return [UIAccessibilityCustomAction(
+                name: NSLocalizedString("Close Tab", comment: ""),
+                target: self,
+                selector: #selector(handleAccessibilityClose)
+            )]
+        }
+        set {}
+    }
+    
+    @objc private func handleAccessibilityClose() -> Bool {
+        guard let onClose else {
+            return false
+        }
+        onClose()
+        return true
     }
 }

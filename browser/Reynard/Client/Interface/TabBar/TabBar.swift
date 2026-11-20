@@ -19,7 +19,6 @@ protocol TabBarDataSource: AnyObject {
 
 final class TabBar: UIView {
     private enum UX {
-        static let tabBarHeight: CGFloat = 36
         static let tabBarBottomPadding: CGFloat = 2
     }
     
@@ -52,6 +51,8 @@ final class TabBar: UIView {
     }
     
     weak var dataSource: TabBarDataSource?
+    /// Links dropped on the strip, to be opened in new tabs.
+    var onDropLinks: (([URL]) -> Void)?
     
     private(set) var visibility: Visibility = .hidden
     private(set) var reorderState: ReorderState = .idle
@@ -66,13 +67,14 @@ final class TabBar: UIView {
     }
     
     var standardHeight: CGFloat {
-        return UX.tabBarHeight + UX.tabBarBottomPadding
+        return BarMetrics.tabBarHeight + UX.tabBarBottomPadding
     }
     
     private let tabCollection = TabBarCollection()
     private lazy var presentation = TabBarPresentation(tabBar: self)
     
     private var heightConstraint: NSLayoutConstraint!
+    private var tabCollectionHeightConstraint: NSLayoutConstraint!
     private var edgeConstraints: [NSLayoutConstraint] = []
     private var safeAreaConstraints: [NSLayoutConstraint] = []
     private var foldSideConstraints: [NSLayoutConstraint] = []
@@ -99,6 +101,12 @@ final class TabBar: UIView {
         configureHierarchy()
         configureConstraints()
         configureTabCollection()
+        accessibilityIdentifier = AccessibilityIdentifier.TabBar.bar
+        LinkDropHandler(acceptsText: false) { [weak self] content in
+            if case let .links(urls) = content {
+                self?.onDropLinks?(urls)
+            }
+        }.install(on: self)
     }
     
     required init?(coder: NSCoder) {
@@ -139,6 +147,13 @@ final class TabBar: UIView {
         
         // The room for tabs changed without the bar changing size: a sidebar came or went beside the page.
         layoutIfNeeded()
+        invalidateLayout()
+    }
+    
+    /// The strip is as high as a tab's title needs at the text size in use.
+    func textSizeDidChange() {
+        tabCollectionHeightConstraint.constant = BarMetrics.tabBarHeight
+        applyVisibility(visibility)
         invalidateLayout()
     }
     
@@ -475,7 +490,7 @@ final class TabBar: UIView {
     
     private func configureConstraints() {
         heightConstraint = heightAnchor.constraint(equalToConstant: 0)
-        let tabCollectionHeightConstraint = tabCollection.heightAnchor.constraint(equalToConstant: UX.tabBarHeight)
+        tabCollectionHeightConstraint = tabCollection.heightAnchor.constraint(equalToConstant: BarMetrics.tabBarHeight)
         edgeConstraints = [
             tabCollection.leadingAnchor.constraint(equalTo: leadingAnchor),
             tabCollection.trailingAnchor.constraint(equalTo: trailingAnchor),

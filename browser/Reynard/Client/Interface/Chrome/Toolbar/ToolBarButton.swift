@@ -10,7 +10,6 @@ import UIKit
 final class ToolbarButton: UIButton {
     private enum UX {
         static let toolbarButtonCornerRadius: CGFloat = 10
-        static let minimumTouchTargetSideLength: CGFloat = 44
         static let downloadButtonSideLength: CGFloat = 44
         static let downloadIconSize: CGFloat = 24
         static let downloadIconVerticalOffset: CGFloat = -1
@@ -80,6 +79,7 @@ final class ToolbarButton: UIButton {
         configureImage()
         configureTarget(target, action: action)
         configureDownloadViewsIfNeeded()
+        configureAccessibility()
     }
     
     required init?(coder: NSCoder) {
@@ -91,11 +91,7 @@ final class ToolbarButton: UIButton {
             return false
         }
         
-        let horizontalInset = min(0, (bounds.width - UX.minimumTouchTargetSideLength) / 2)
-        let verticalInset = min(0, (bounds.height - UX.minimumTouchTargetSideLength) / 2)
-        let hitFrame = bounds.insetBy(dx: horizontalInset, dy: verticalInset)
-        
-        return hitFrame.contains(point)
+        return TouchTarget.hitFrame(for: bounds).contains(point)
     }
     
     override var intrinsicContentSize: CGSize {
@@ -128,7 +124,27 @@ final class ToolbarButton: UIButton {
         downloadProgressTrackView.isHidden = !showsProgress
         downloadProgressFillView.isHidden = !showsProgress
         downloadProgressFillWidthConstraint.constant = UX.downloadProgressTrackWidth * progress
-        accessibilityLabel = NSLocalizedString("Downloads", comment: "")
+        // The bar under the symbol is the only sign of progress, so VoiceOver reads it as the value.
+        accessibilityValue = showsProgress
+        ? NumberFormatter.localizedString(from: NSNumber(value: Double(progress)), number: .percent)
+        : nil
+        if showsProgress {
+            accessibilityTraits.insert(.updatesFrequently)
+        } else {
+            accessibilityTraits.remove(.updatesFrequently)
+        }
+    }
+    
+    /// The library button with an update waiting shows a dot. VoiceOver says what the dot means.
+    func setIndicatesUpdate(_ hasUpdate: Bool) {
+        guard toolbarButtonType == .library else {
+            return
+        }
+        setImage(
+            hasUpdate ? UIImage(named: "reynard.ellipsis.circle.badge") : UIImage(named: symbolName),
+            for: .normal
+        )
+        accessibilityValue = hasUpdate ? NSLocalizedString("Update Available", comment: "") : nil
     }
     
     // MARK: - View Setup
@@ -152,6 +168,40 @@ final class ToolbarButton: UIButton {
             UIImage.SymbolConfiguration(pointSize: pointSize, weight: .regular),
             forImageIn: .normal
         )
+    }
+    
+    /// A toolbar button is a symbol and nothing else, so its name comes from here: for VoiceOver, for the
+    /// Large Content Viewer at the accessibility text sizes, and for UI tests.
+    private func configureAccessibility() {
+        accessibilityLabel = accessibilityName
+        accessibilityIdentifier = identifier
+        enableLargeContentViewer(title: accessibilityName, image: UIImage(named: symbolName))
+    }
+    
+    private var accessibilityName: String {
+        switch toolbarButtonType {
+        case .back: return NSLocalizedString("Back", comment: "")
+        case .forward: return NSLocalizedString("Forward", comment: "")
+        case .share: return NSLocalizedString("Share", comment: "")
+        case .library: return NSLocalizedString("Bookmarks", comment: "")
+        case .tabOverview: return NSLocalizedString("Tabs", comment: "")
+        case .download: return NSLocalizedString("Downloads", comment: "")
+        case .newTab: return NSLocalizedString("New Tab", comment: "")
+        case .sidebar: return NSLocalizedString("Show or Hide Sidebar", comment: "")
+        }
+    }
+    
+    private var identifier: String {
+        switch toolbarButtonType {
+        case .back: return AccessibilityIdentifier.Toolbar.back
+        case .forward: return AccessibilityIdentifier.Toolbar.forward
+        case .share: return AccessibilityIdentifier.Toolbar.share
+        case .library: return AccessibilityIdentifier.Toolbar.library
+        case .tabOverview: return AccessibilityIdentifier.Toolbar.tabOverview
+        case .download: return AccessibilityIdentifier.Toolbar.downloads
+        case .newTab: return AccessibilityIdentifier.Toolbar.newTab
+        case .sidebar: return AccessibilityIdentifier.Toolbar.sidebar
+        }
     }
     
     private func configureTarget(_ target: AnyObject, action: Selector) {

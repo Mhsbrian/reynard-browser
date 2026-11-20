@@ -32,9 +32,12 @@ final class FavoriteFolderCollectionViewCell: UICollectionViewCell {
         return folderBackgroundView
     }
     
-    private static let titleFont = UIFontMetrics(forTextStyle: .caption1).scaledFont(
-        for: .systemFont(ofSize: UX.titleFontSize, weight: .semibold)
-    )
+    private static let titleFont = HomepageTextMetrics.tileTitleFont(weight: .semibold)
+    
+    /// The room the tile's name takes under its icon at the text size in use.
+    static var titleHeight: CGFloat {
+        return HomepageTextMetrics.tileTitleHeight(weight: .semibold, minimum: UX.titleHeight)
+    }
     
     private let folderBackgroundView: UIVisualEffectView = {
         let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
@@ -115,9 +118,15 @@ final class FavoriteFolderCollectionViewCell: UICollectionViewCell {
         previewBookmarks: [BookmarkSnapshot],
         titleColor: UIColor
     ) {
-        titleLabel.text = folder.title
+        HomepageTextMetrics.setTileTitle(folder.title, on: titleLabel)
         titleLabel.textColor = titleColor
         configurePreview(bookmarks: Array(previewBookmarks.prefix(4)))
+        
+        isAccessibilityElement = true
+        accessibilityLabel = folder.title
+        accessibilityValue = NSLocalizedString("Folders", comment: "")
+        accessibilityTraits = .button
+        enableLargeContentViewer(title: folder.title)
     }
     
     func setReorderState(_ state: ReorderState, animated: Bool) {
@@ -149,6 +158,7 @@ final class FavoriteFolderCollectionViewCell: UICollectionViewCell {
     }
     
     private func configureConstraints() {
+        let titleHeightConstraint = titleLabel.heightAnchor.constraint(equalToConstant: Self.titleHeight)
         let folderWidthConstraint = folderBackgroundView.widthAnchor.constraint(equalToConstant: UX.maximumIconSize)
         let folderHeightConstraint = folderBackgroundView.heightAnchor.constraint(equalToConstant: UX.maximumIconSize)
         let folderTopConstraint = folderBackgroundView.topAnchor.constraint(equalTo: contentView.topAnchor)
@@ -172,10 +182,10 @@ final class FavoriteFolderCollectionViewCell: UICollectionViewCell {
             previewGridView.topAnchor.constraint(equalTo: folderBackgroundView.topAnchor, constant: UX.previewInset),
             previewGridView.bottomAnchor.constraint(equalTo: folderBackgroundView.bottomAnchor, constant: -UX.previewInset),
             
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: -HomepageTextMetrics.tileTitleOutset),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: HomepageTextMetrics.tileTitleOutset),
             titleLabel.topAnchor.constraint(equalTo: folderBackgroundView.bottomAnchor),
-            titleLabel.heightAnchor.constraint(equalToConstant: UX.titleHeight),
+            titleHeightConstraint,
         ])
     }
     

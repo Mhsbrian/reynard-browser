@@ -59,7 +59,7 @@ final class UpdateAvailableViewController: UIViewController, HomepageRecommendat
     private let foldReader = DisplayFoldReader()
     
     private let textStackView: UIStackView = {
-        let stackView = UIStackView()
+        let stackView = TouchTargetExtendingStackView()
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.axis = .vertical
         stackView.alignment = .fill
@@ -70,9 +70,7 @@ final class UpdateAvailableViewController: UIViewController, HomepageRecommendat
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFontMetrics(forTextStyle: .title2).scaledFont(
-            for: .systemFont(ofSize: UX.titleFontSize, weight: .bold)
-        )
+        label.font = HomepageTextMetrics.headingFont(ofSize: UX.titleFontSize)
         label.text = NSLocalizedString("Update Available", comment: "")
         label.textAlignment = .left
         label.textColor = .label
@@ -93,7 +91,7 @@ final class UpdateAvailableViewController: UIViewController, HomepageRecommendat
     }()
     
     private let buttonStackView: UIStackView = {
-        let stackView = UIStackView()
+        let stackView = TouchTargetExtendingStackView()
         stackView.axis = .horizontal
         stackView.alignment = .center
         stackView.distribution = .fill
@@ -173,10 +171,9 @@ final class UpdateAvailableViewController: UIViewController, HomepageRecommendat
             return false
         }
         
-        if PerformanceRecommendationViewController.isRecommendationShown(
-            isPrivateBrowsing: isPrivateBrowsing,
-            contentMode: contentMode
-        ) {
+        // One card at the top of the page at a time, and the welcome comes first. The advice to enable JIT
+        // is at the foot of the page and no longer keeps an update from being announced.
+        if WelcomeViewController.isShown(isPrivateBrowsing: isPrivateBrowsing, contentMode: contentMode) {
             return false
         }
         
@@ -231,12 +228,17 @@ final class UpdateAvailableViewController: UIViewController, HomepageRecommendat
     
     private func makeActionButton(title: String, imageName: String, action: Selector) -> UIButton {
         let configuration = UIImage.SymbolConfiguration(pointSize: UX.actionIconSize, weight: .regular)
-        let button = UIButton(type: .system)
+        // Text as high as its line, with the 44 points a touch target needs around it.
+        let button = MinimumTouchTargetButton(type: .system)
         button.setTitle(title, for: .normal)
         button.setImage(UIImage(named: imageName, in: .main, with: configuration), for: .normal)
         button.tintColor = .label
         button.titleLabel?.font = .preferredFont(forTextStyle: .body)
         button.titleLabel?.adjustsFontForContentSizeCategory = true
+        // At the largest text sizes a title wider than the card is made smaller to fit, not cut in the middle.
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.titleLabel?.minimumScaleFactor = 0.5
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.contentHorizontalAlignment = .leading
         button.semanticContentAttribute = .forceLeftToRight
         button.titleEdgeInsets = UIEdgeInsets(top: 0, left: UX.buttonImageSpacing, bottom: 0, right: -UX.buttonImageSpacing)

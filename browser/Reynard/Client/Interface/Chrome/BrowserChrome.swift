@@ -16,8 +16,7 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
             if #available(iOS 26.0, *) { return 0.05 }
             return 0.12
         }
-        static let minimizedToolbarContentHeight: CGFloat = 24
-        static let minimizedTextFontSize: CGFloat = 13
+        static let minimizedToolbarBaseContentHeight: CGFloat = 24
         static let textShrinkTravelFraction: CGFloat = 0.75
         static let toolbarContentFadeDuration: TimeInterval = 0.12
     }
@@ -78,6 +77,8 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
     var onLibrary: (() -> Void)?
     var onDownloads: (() -> Void)?
     var onNewTab: (() -> Void)?
+    /// Links dropped on the tab strip or on the new tab button.
+    var onDropLinks: (([URL]) -> Void)?
     var onTabOverview: (() -> Void)?
     var onOverlayDismiss: (() -> Void)?
     var onPageZoomOut: (() -> Void)?
@@ -225,9 +226,14 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         return addressBar.bottomAnchor
     }
     
+    /// The strip a hidden toolbar leaves behind, with the page's address in small text. It grows with that text.
+    private static var minimizedToolbarContentHeight: CGFloat {
+        return UX.minimizedToolbarBaseContentHeight + BarMetrics.growth(forTextOfSize: BarMetrics.minimizedTextSize)
+    }
+    
     func minimizedToolbarHeight(for mode: BrowserChromeMode) -> CGFloat {
         let inset = mode == .phone ? safeAreaInsets.bottom : (state?.topInset ?? safeAreaInsets.top)
-        let minimizedHeight = inset + UX.minimizedToolbarContentHeight
+        let minimizedHeight = inset + Self.minimizedToolbarContentHeight
         // A top toolbar in the status items' row has no height to give back: the row stays as tall as the
         // status items whatever the toolbar does. It keeps its place and only the tab strip under it goes.
         if mode != .phone, state?.topToolbarSharesStatusRow == true {
@@ -866,6 +872,8 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         topToolbar.onLibrary = { [weak self] in self?.onLibrary?() }
         topToolbar.onDownloads = { [weak self] in self?.onDownloads?() }
         topToolbar.onNewTab = { [weak self] in self?.onNewTab?() }
+        topToolbar.onDropLinks = { [weak self] urls in self?.onDropLinks?(urls) }
+        tabBar.onDropLinks = { [weak self] urls in self?.onDropLinks?(urls) }
         topToolbar.onTabOverview = { [weak self] in self?.onTabOverview?() }
         
         bottomToolbar.onBack = { [weak self] in self?.onBack?() }
@@ -988,9 +996,9 @@ final class BrowserChrome: UIView, UIGestureRecognizerDelegate {
         let totalTravel = abs(offset) / toolbarCollapseProgress
         let expandedFrame = presentation.frame.offsetBy(dx: 0, dy: -offset)
         let minimizedTextCenterY = isBottom
-        ? bounds.maxY - safeAreaInsets.bottom - UX.minimizedToolbarContentHeight / 2
-        : state.topInset + UX.minimizedToolbarContentHeight / 2
-        let minimizedScale = UX.minimizedTextFontSize / presentation.font.pointSize
+        ? bounds.maxY - safeAreaInsets.bottom - Self.minimizedToolbarContentHeight / 2
+        : state.topInset + Self.minimizedToolbarContentHeight / 2
+        let minimizedScale = BarMetrics.scaled(BarMetrics.minimizedTextSize) / presentation.font.pointSize
         let minimizedTextHeight = presentation.font.lineHeight * minimizedScale
         let targetEdge = minimizedTextCenterY + (isBottom ? minimizedTextHeight : -minimizedTextHeight) / 2
         let edgeTravel = max(0, isBottom ? targetEdge - expandedFrame.maxY : expandedFrame.minY - targetEdge)
